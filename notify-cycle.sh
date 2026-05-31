@@ -38,13 +38,19 @@ notify() {
   fi
 }
 
-# Run the scan cycle (data-only core). Exit 0 = clean, 1 = needs attention.
+# Run the scan cycle (data-only core). Exit codes: 0 clean, 1 needs attention,
+# 2 cycle failure (no fresh manifest / stale `latest`). Honor rc=2 directly so
+# we never read a manifest daily-cycle already judged stale — no log-grepping.
 "$HONEY/daily-cycle.sh"
 RC=$?
 
 MANIFEST="$HONEY/latest/manifest.json"
-if [ ! -f "$MANIFEST" ]; then
-  notify "🐝 Bumblebee scan FAILED" "No results produced — see $CYCLE_LOG"
+# Only 0 (clean) and 1 (fresh, needs attention) mean a trustworthy manifest.
+# Anything else — 2 (stale/no manifest), or 126/127/signal if daily-cycle
+# couldn't even run — means do NOT trust `latest`.
+if { [ "$RC" -ne 0 ] && [ "$RC" -ne 1 ]; } || [ ! -f "$MANIFEST" ]; then
+  notify "🐝 Bumblebee scan FAILED" "No fresh results produced — see $CYCLE_LOG"
+  clog "cycle failed / no fresh manifest (daily-cycle rc=$RC)"
   exit 1
 fi
 

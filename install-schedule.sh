@@ -15,16 +15,28 @@ set -uo pipefail
 HONEY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ACTION="${1:-install}"
 WHEN="${2:-12:00}"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+# Parse + validate HH:MM (24h). Reject anything that isn't two colon-separated
+# numbers in range, so a typo can't silently schedule the wrong time.
+case "$WHEN" in
+  *:*) : ;;
+  *) die "time must be HH:MM (24-hour), got '$WHEN'" ;;
+esac
 HOUR="${WHEN%%:*}"; MIN="${WHEN##*:}"
-HOUR="$((10#$HOUR))"; MIN="$((10#$MIN))"   # strip any leading zero, force base-10
+case "$HOUR$MIN" in
+  *[!0-9]*|"") die "time must be numeric HH:MM, got '$WHEN'" ;;
+esac
+HOUR="$((10#$HOUR))"; MIN="$((10#$MIN))"   # strip leading zero, force base-10
+{ [ "$HOUR" -ge 0 ] && [ "$HOUR" -le 23 ] && [ "$MIN" -ge 0 ] && [ "$MIN" -le 59 ]; } \
+  || die "time out of range (00:00–23:59), got '$WHEN'"
 
 LABEL="com.honey.bumblebee.notify"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 ENTRY="$HONEY/notify-cycle.sh"
 CRON_TAG="# honey-bumblebee-notify"
 OS="$(uname -s)"
-
-die() { echo "error: $*" >&2; exit 1; }
 
 # ---------- macOS (launchd) -------------------------------------------------
 mac_install() {

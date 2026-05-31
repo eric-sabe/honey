@@ -76,7 +76,8 @@ jq -rs --argjson ord "$ORDER" '
   [.severity,.package_name,.version,.ecosystem,.catalog_name,.source_file,.confidence,.catalog_id]
   | @tsv' "$FINDINGS" 2>/dev/null | while IFS=$'\t' read -r SEV PKG VER_ ECO CAT SRC CONF CID; do
   case "$SEV" in critical|high) C="$R";; medium) C="$Y";; *) C="$D";; esac
-  echo "${C}● ${SEV^^}${O}  ${B}$PKG${O} $VER_  ${D}($ECO)${O}"
+  SEV_UC="$(printf '%s' "$SEV" | tr '[:lower:]' '[:upper:]')"  # portable: macOS bash is 3.2, no ${x^^}
+  echo "${C}● ${SEV_UC}${O}  ${B}$PKG${O} $VER_  ${D}($ECO)${O}"
   echo "    campaign : $CAT"
   echo "    where    : $SRC"
   case "$CONF" in

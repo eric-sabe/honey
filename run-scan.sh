@@ -138,10 +138,16 @@ log "scan exit code: $SCAN_EXIT"
 jq -c 'select(.record_type=="finding")'      "$RECORDS" >"$FINDINGS" 2>/dev/null || : >"$FINDINGS"
 jq -c 'select(.record_type=="scan_summary")' "$RECORDS" >"$SUMMARY"  2>/dev/null || : >"$SUMMARY"
 
-# stderr carries a "scan complete" diagnostic whose message reports whether the
-# walk finished or hit --max-duration (timed_out=true => partial coverage).
+# Did the walk finish, or hit --max-duration (=> partial coverage)? Prefer the
+# structured scan_summary.timed_out boolean; only fall back to grepping the
+# stderr diagnostic prose if that field is somehow absent (older scanner).
 SCAN_COMPLETED=true
-grep -q 'timed_out=true' "$DIAGS" 2>/dev/null && SCAN_COMPLETED=false
+TIMED_OUT="$(jq -r '.timed_out // empty' "$SUMMARY" 2>/dev/null)"
+if [ "$TIMED_OUT" = "true" ]; then
+  SCAN_COMPLETED=false
+elif [ -z "$TIMED_OUT" ]; then
+  grep -q 'timed_out=true' "$DIAGS" 2>/dev/null && SCAN_COMPLETED=false
+fi
 
 FINDINGS_TOTAL="$(wc -l <"$FINDINGS" 2>/dev/null | tr -d '[:space:]')"
 [ -z "$FINDINGS_TOTAL" ] && FINDINGS_TOTAL=0
