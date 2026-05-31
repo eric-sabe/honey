@@ -153,6 +153,30 @@ function Get-HoneyTimestamp {
     return (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
 }
 
+# Parse a STREAM of concatenated JSON objects (e.g. govulncheck -format json,
+# which emits {...}{...} pretty-printed, NOT an array and NOT NDJSON).
+# ConvertFrom-Json rejects that ("Additional text encountered"), and `jq -s` is
+# the bash equivalent we're replacing. Splits on a top-level '}'→'{' line
+# boundary and parses each object. Returns $null if NOTHING parses (caller
+# treats that as a scan error), else the array of parsed objects.
+function ConvertFrom-JsonStream {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return $null }
+    $raw = Get-Content -LiteralPath $Path -Raw
+    if (-not $raw) { return $null }
+    $chunks = [System.Text.RegularExpressions.Regex]::Split($raw, '(?<=\n})\n(?={)')
+    $objs = @()
+    foreach ($c in $chunks) {
+        if (-not $c.Trim()) { continue }
+        # A malformed chunk is deliberately skipped — a partial/truncated object
+        # shouldn't discard the valid ones (mirrors the bash `fromjson?` tolerance).
+        try { $objs += ($c | ConvertFrom-Json) } catch { Write-Verbose "skipped unparseable JSON chunk" }
+    }
+    if ($objs.Count -eq 0) { return $null }
+    return $objs
+}
+
 Export-ModuleMember -Function Get-HoneyRoot, Get-HoneyHome, Import-HoneyConfig, Get-HoneySetting,
     Get-StatusRank, Resolve-WorseStatus, Write-LensResult, Get-SeverityFromCvss,
-    Set-HoneyLatest, Get-HoneyLatest, Write-HoneyConsole, Write-HoneyLog, Get-HoneyTimestamp
+    Set-HoneyLatest, Get-HoneyLatest, Write-HoneyConsole, Write-HoneyLog, Get-HoneyTimestamp,
+    ConvertFrom-JsonStream
