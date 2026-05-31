@@ -72,6 +72,39 @@ the `go install` can delete them.
 - `incomplete` — hit `--max-duration`; coverage partial, NOT all-clear.
 - `scan_error` — scan failed; see `cycle.log` / `diagnostics.ndjson`.
 
+## Lenses — additional scanners (optional)
+
+bumblebee is honey's canonical lens (known-bad catalog matching). honey can
+run **additional lenses** alongside it — independent scanners that cover a
+different surface — and fold their results into one report. Each lens lives in
+[`lenses/`](lenses) as a small script; if its underlying tool isn't installed,
+the lens is **inert** (a clean machine with no lens tools behaves exactly as
+bumblebee-only). The cycle's overall verdict is the **worst** across bumblebee
+and every active lens — a lens can escalate concern, never mask a bumblebee
+finding.
+
+### Bundled lens: `skillspector` (AI agent skills)
+
+[NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) scans installed
+AI agent skills (`SKILL.md` + bundled scripts, as loaded by Claude Code, Codex,
+Gemini CLI, etc.) for prompt injection, data exfiltration, excessive agency,
+tool poisoning, and other agent-specific risks — a surface bumblebee's
+package/catalog model doesn't cover. honey complements it: bumblebee answers
+*"do I have a known-compromised package?"*, skillspector answers *"is this
+skill, which no catalog knows yet, behaving maliciously?"*
+
+This lens is **opt-in** and adds no dependency unless you install SkillSpector
+yourself (it needs Python 3.12+; honey never installs it for you). Once
+`skillspector` is on your `PATH`, the lens activates automatically and scans
+the skill directories under `~/.claude` (override with `HONEY_SKILL_ROOTS`, a
+colon-separated list). It runs SkillSpector's **static analysis** (`--no-llm`)
+by default — deterministic, no API keys; honey's own Claude routine is the
+semantic layer. Set `HONEY_SKILLSPECTOR_LLM=1` to enable SkillSpector's LLM
+stage instead.
+
+`./doctor.sh` shows which lenses are active. A lens being inactive never fails
+the core checks.
+
 ## Optional: daily Slack triage via a Claude Local routine
 
 If you use [Claude Code](https://claude.com/claude-code) and have the Slack
@@ -170,11 +203,15 @@ honey/
 ├── run-scan.sh       # update repo+binary, deep-scan, write a run + manifest
 ├── daily-cycle.sh    # one cycle: run-scan, exit 0=clean / 1=needs attention
 ├── notify-cycle.sh   # scan + native desktop notification (no-Claude path)
-├── report.sh         # deterministic triage report from a run (no AI needed)
+├── report.sh         # deterministic triage report (bumblebee + all lenses; no AI)
 ├── install-schedule.sh # schedule notify-cycle via launchd (macOS) / cron (Linux)
+├── lenses/           # optional additional scanners (e.g. skillspector.sh)
 ├── routine-prompt.md # prompt for the Claude Local routine (scheduled path)
 ├── triage-guide.md   # guide for triaging a run by hand in a chat
 ├── runs/<TS>/        # one timestamped run per scan (gitignored — host inventory)
+│   ├── manifest.json      # bumblebee verdict + metadata
+│   ├── findings.ndjson    # bumblebee finding records
+│   └── lens-<name>.json   # each active lens's normalized findings
 └── latest -> runs/…  # symlink to the most recent run (gitignored)
 ```
 

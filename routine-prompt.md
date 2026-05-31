@@ -26,12 +26,14 @@ STEP 2 — GET THE FACTS. Run the deterministic report generator:
 
     HONEY_DIR/report.sh
 
-It prints the verdict (clean / exposed / incomplete / scan_error), coverage,
-and — when exposed — every match grouped by severity with its location,
-confidence, and standard per-ecosystem remediation. Treat its output as the
-factual baseline; do not contradict it or invent findings beyond it. For any
-extra detail, read HONEY_DIR/latest/manifest.json and
-HONEY_DIR/latest/findings.ndjson (one finding per line).
+It prints the OVERALL verdict plus a section per scanner: bumblebee (package /
+catalog matches) and any active lenses (e.g. skillspector for AI agent skills).
+Treat its output as the factual baseline; do not contradict it or invent
+findings beyond it. For extra detail read HONEY_DIR/latest/manifest.json and
+findings.ndjson (bumblebee), and HONEY_DIR/latest/lens-*.json (each lens's
+normalized findings: severity, title, location, detail, ref). The overall
+verdict is the worst across all scanners — surface every scanner's findings,
+not just bumblebee's.
 
 STEP 3 — ENRICH. Add judgment that a static report can't:
   • For each finding, note whether source_type / root_kind suggests a direct

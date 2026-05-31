@@ -17,9 +17,14 @@ exactly matches a known-compromised entry in a threat-intelligence catalog.
    remediation. Treat this as ground truth; don't contradict it or invent
    findings beyond it.
 
+   The report covers bumblebee AND any active lenses (e.g. skillspector for AI
+   agent skills); the OVERALL verdict is the worst across all of them. Surface
+   every scanner's findings, not just bumblebee's.
+
 2. For detail beyond the report, read the run dir:
-   - `manifest.json`   — verdict, counts, metadata.
-   - `findings.ndjson` — one finding per line.
+   - `manifest.json`   — bumblebee verdict, counts, metadata.
+   - `findings.ndjson` — bumblebee findings, one per line.
+   - `lens-*.json`     — each lens's normalized findings.
    - `summary.json`    — coverage stats.
    - `update.log` / `diagnostics.ndjson` — read on errors/timeouts.
    Each finding's `catalog_id` maps to an entry under the manifest's

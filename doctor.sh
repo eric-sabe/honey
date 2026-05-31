@@ -19,6 +19,28 @@ echo
 echo "checks:"
 run_all_checks
 fails=$?
+
+# Optional lenses — informational only; never affect the core pass/fail.
+# A lens whose tool isn't installed is simply inactive (honey's core path is
+# unaffected). This just tells you which extra scanners are live.
+if [ -d "$HONEY/lenses" ] && ls "$HONEY"/lenses/*.sh >/dev/null 2>&1; then
+  echo
+  echo "optional lenses:"
+  for lens in "$HONEY"/lenses/*.sh; do
+    lname="$(basename "$lens" .sh)"
+    case "$lname" in
+      skillspector)
+        if command -v skillspector >/dev/null 2>&1; then
+          ok "lens $lname active ($(skillspector --version 2>/dev/null | head -1))"
+        else
+          bad "lens $lname inactive — skillspector not installed (optional)"
+          hint "agent-skill scanning; install per https://github.com/NVIDIA/skillspector then it activates automatically"
+        fi ;;
+      *)
+        if command -v "$lname" >/dev/null 2>&1; then ok "lens $lname active"; else bad "lens $lname inactive (optional tool '$lname' not installed)"; fi ;;
+    esac
+  done
+fi
 echo
 if [ "$fails" -eq 0 ]; then
   printf '%sAll checks passed — honey is ready.%s Run:  ./daily-cycle.sh\n' "$C_OK" "$C_OFF"

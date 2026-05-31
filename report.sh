@@ -44,54 +44,96 @@ remediation() {  # ecosystem package version
   esac
 }
 
+# severity → rank, for "worst wins" across bumblebee + every lens.
+rank() { case "$1" in scan_error) echo 4;; exposed) echo 3;; incomplete) echo 2;; clean|skipped) echo 1;; *) echo 0;; esac; }
+
+# render_lenses — print a section per lens-*.json in the run dir, and update
+# OVERALL to the worst status seen. Lenses are honey's additional scanners
+# (e.g. skillspector for agent skills); absent ones simply don't appear.
+OVERALL="$STATUS"
+render_lenses() {
+  local lj name lstatus ltotal lnote
+  for lj in "$RUN_DIR"/lens-*.json; do
+    [ -f "$lj" ] || continue
+    name="$(jq -r '.lens' "$lj" 2>/dev/null)"
+    lstatus="$(jq -r '.status' "$lj" 2>/dev/null)"
+    ltotal="$(jq -r '.findings_total' "$lj" 2>/dev/null)"
+    lnote="$(jq -r '.note // empty' "$lj" 2>/dev/null)"
+    [ "$(rank "$lstatus")" -gt "$(rank "$OVERALL")" ] && OVERALL="$lstatus"
+    echo
+    case "$lstatus" in
+      skipped)    echo "${D}— lens ${name}: skipped${O} (${lnote})"; continue ;;
+      clean)      echo "${G}✓ lens ${name}: clean${O} (${lnote})"; continue ;;
+      scan_error) echo "${R}✗ lens ${name}: scan error${O} (${lnote})"; continue ;;
+      incomplete) echo "${Y}⚠ lens ${name}: incomplete${O} (${lnote})"; continue ;;
+    esac
+    # exposed → list its findings worst-severity first.
+    local by; by="$(jq -r '.findings_by_severity | to_entries | map("\(.value) \(.key)") | join(", ")' "$lj" 2>/dev/null)"
+    echo "${R}🚨 lens ${name}: ${ltotal} finding(s)${O} [$by]  ${D}(${lnote})${O}"
+    jq -rs --argjson ord "$ORDER" '.[0] | (.findings // [])
+      | sort_by($ord[.severity] // 9)[]
+      | [.severity,.title,.location,.detail,.ref] | @tsv' "$lj" 2>/dev/null \
+    | while IFS=$'\t' read -r SEV TITLE LOC DET REF; do
+        case "$SEV" in critical|high) C="$R";; medium) C="$Y";; *) C="$D";; esac
+        SEV_UC="$(printf '%s' "$SEV" | tr '[:lower:]' '[:upper:]')"
+        REFSUFFIX=""; [ -n "$REF" ] && REFSUFFIX="  ${D}(${REF})${O}"
+        echo "  ${C}● ${SEV_UC}${O}  ${B}${TITLE}${O}${REFSUFFIX}"
+        echo "      where : $LOC"
+        [ -n "$DET" ] && echo "      detail: $DET"
+      done
+  done
+}
+
+ORDER='{"critical":0,"high":1,"medium":2,"low":3,"unknown":4}'
+
 echo "${B}honey scan report${O}  ${D}($WHEN)${O}"
 echo "host: $HOST   scanned: $ROOT   files: $FILES   scanner: $VER"
 echo
 
+# --- bumblebee section (canonical lens) ------------------------------------
 case "$STATUS" in
   clean)
-    echo "${G}✓ CLEAN${O} — scan completed, no exposure matches against the catalogs in $CATDIR."
-    exit 0 ;;
+    echo "${G}✓ bumblebee: CLEAN${O} — no exposure matches against the catalogs in $CATDIR." ;;
   incomplete)
-    echo "${Y}⚠ INCOMPLETE${O} — the scan hit its time limit (scan_completed=$COMPLETED), so coverage is PARTIAL."
-    echo "Absence of findings is NOT all-clear. Re-run with a larger BUMBLEBEE_MAX_DURATION"
-    echo "or a narrower BUMBLEBEE_SCAN_ROOT, then re-check."
-    exit 1 ;;
+    echo "${Y}⚠ bumblebee: INCOMPLETE${O} — hit the time limit (scan_completed=$COMPLETED); coverage is PARTIAL."
+    echo "Absence of matches is NOT all-clear. Re-run with a larger BUMBLEBEE_MAX_DURATION or narrower root." ;;
   scan_error)
-    echo "${R}✗ SCAN ERROR${O} — the scan failed (scan_exit_code=$(j '.scan_exit_code'))."
+    echo "${R}✗ bumblebee: SCAN ERROR${O} (scan_exit_code=$(j '.scan_exit_code'))."
     echo "Diagnostics:"; tail -n 5 "$RUN_DIR/diagnostics.ndjson" 2>/dev/null | sed 's/^/  /'
-    echo "Full log: $RUN_DIR/update.log"
-    exit 1 ;;
+    echo "Full log: $RUN_DIR/update.log" ;;
+  exposed)
+    BY_SEV="$(j '.findings_by_severity | to_entries | map("\(.value) \(.key)") | join(", ")')"
+    echo "${R}🚨 bumblebee: EXPOSED${O} — $TOTAL match(es): $BY_SEV"
+    echo
+    jq -rs --argjson ord "$ORDER" '
+      sort_by($ord[.severity] // 9)[] |
+      [.severity,.package_name,.version,.ecosystem,.catalog_name,.source_file,.confidence,.catalog_id]
+      | @tsv' "$FINDINGS" 2>/dev/null | while IFS=$'\t' read -r SEV PKG VER_ ECO CAT SRC CONF CID; do
+      case "$SEV" in critical|high) C="$R";; medium) C="$Y";; *) C="$D";; esac
+      SEV_UC="$(printf '%s' "$SEV" | tr '[:lower:]' '[:upper:]')"  # portable: macOS bash 3.2, no ${x^^}
+      echo "  ${C}● ${SEV_UC}${O}  ${B}$PKG${O} $VER_  ${D}($ECO)${O}"
+      echo "      campaign  : $CAT"
+      echo "      where     : $SRC"
+      case "$CONF" in
+        high)   echo "      confidence: high — exact installed version present";;
+        medium) echo "      confidence: medium — identity reliable, version/source partial";;
+        low)    echo "      confidence: low — config/spec reference, not proof of an installed build";;
+        *)      echo "      confidence: $CONF";;
+      esac
+      echo "      fix       : $(remediation "$ECO" "$PKG" "$VER_")"
+      echo "      source    : catalog entry $CID in $CATDIR"
+    done ;;
 esac
 
-# --- exposed ---------------------------------------------------------------
-BY_SEV="$(j '.findings_by_severity | to_entries | map("\(.value) \(.key)") | join(", ")')"
-echo "${R}🚨 EXPOSED${O} — $TOTAL match(es): $BY_SEV"
+# --- additional lenses ------------------------------------------------------
+render_lenses
+
+# --- overall verdict --------------------------------------------------------
 echo
-
-# Emit findings worst-severity first. Read each as a TSV line for the shell.
-ORDER='{"critical":0,"high":1,"medium":2,"low":3,"unknown":4}'
-jq -rs --argjson ord "$ORDER" '
-  sort_by($ord[.severity] // 9)[] |
-  [.severity,.package_name,.version,.ecosystem,.catalog_name,.source_file,.confidence,.catalog_id]
-  | @tsv' "$FINDINGS" 2>/dev/null | while IFS=$'\t' read -r SEV PKG VER_ ECO CAT SRC CONF CID; do
-  case "$SEV" in critical|high) C="$R";; medium) C="$Y";; *) C="$D";; esac
-  SEV_UC="$(printf '%s' "$SEV" | tr '[:lower:]' '[:upper:]')"  # portable: macOS bash is 3.2, no ${x^^}
-  echo "${C}● ${SEV_UC}${O}  ${B}$PKG${O} $VER_  ${D}($ECO)${O}"
-  echo "    campaign : $CAT"
-  echo "    where    : $SRC"
-  case "$CONF" in
-    high)   echo "    confidence: high — exact installed version present";;
-    medium) echo "    confidence: medium — identity reliable, version/source partial";;
-    low)    echo "    confidence: low — config/spec reference, not proof of an installed build";;
-    *)      echo "    confidence: $CONF";;
-  esac
-  echo "    fix      : $(remediation "$ECO" "$PKG" "$VER_")"
-  echo "    source   : catalog entry $CID in $CATDIR"
-  echo
-done
-
-echo "${B}Do first:${O} address ${R}critical/high${O} + high-confidence matches above before lower ones."
-echo "Verify each fix manually; honey only reports, it never changes your system."
-echo "Raw records: $FINDINGS"
+if [ "$OVERALL" = "clean" ]; then
+  echo "${G}OVERALL: CLEAN${O} across bumblebee and all active lenses."
+  exit 0
+fi
+echo "${B}OVERALL: $(printf '%s' "$OVERALL" | tr '[:lower:]' '[:upper:]')${O} — address critical/high + high-confidence items first."
+echo "Verify each fix manually; honey only reports, it never changes your system. Raw records under: $RUN_DIR"
 exit 1

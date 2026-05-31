@@ -53,6 +53,31 @@ STATUS="$(jq -r '.status' "$MANIFEST" 2>/dev/null)"
 TOTAL="$(jq -r '.findings_total' "$MANIFEST" 2>/dev/null)"
 clog "manifest status=$STATUS findings=$TOTAL run_dir=$RUN_DIR"
 
-clog "=== cycle end (status=$STATUS) ==="
-# 0 when clean; 1 when the run needs attention, for the caller to branch on.
-[ "$STATUS" = "clean" ] && exit 0 || exit 1
+# ---- Additional lenses -----------------------------------------------------
+# bumblebee (above) is the canonical lens; its status/manifest are untouched.
+# Optional lenses in lenses/*.sh run next, each writing lens-<name>.json into
+# the run dir (normalized shape) and self-skipping if their tool isn't present.
+# An uninstalled lens is fully inert — bash-only users get identical behavior.
+# The overall status is the WORST across bumblebee + all non-skipped lenses;
+# lenses can only ESCALATE concern, never mask a bumblebee finding.
+overall_rank() {  # map a status to a severity rank for "worst wins"
+  case "$1" in scan_error) echo 4;; exposed) echo 3;; incomplete) echo 2;; clean) echo 1;; *) echo 0;; esac
+}
+OVERALL="$STATUS"
+if [ -d "$HONEY/lenses" ]; then
+  for lens in "$HONEY/lenses"/*.sh; do
+    [ -f "$lens" ] || continue   # no lenses installed → loop body never runs
+    "$lens" "$RUN_DIR" >>"$CYCLE_LOG" 2>&1
+    LJSON="$RUN_DIR/lens-$(basename "$lens" .sh).json"
+    [ -f "$LJSON" ] || continue
+    LSTATUS="$(jq -r '.status' "$LJSON" 2>/dev/null)"
+    LTOTAL="$(jq -r '.findings_total' "$LJSON" 2>/dev/null)"
+    clog "lens $(basename "$lens" .sh): status=$LSTATUS findings=$LTOTAL"
+    [ "$LSTATUS" = "skipped" ] && continue
+    [ "$(overall_rank "$LSTATUS")" -gt "$(overall_rank "$OVERALL")" ] && OVERALL="$LSTATUS"
+  done
+fi
+
+clog "=== cycle end (bumblebee=$STATUS overall=$OVERALL) ==="
+# 0 when overall clean; 1 when anything (bumblebee or a lens) needs attention.
+[ "$OVERALL" = "clean" ] && exit 0 || exit 1

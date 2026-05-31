@@ -25,3 +25,19 @@ from a local checkout of the bumblebee repository at runtime; neither is
 included in this repository. All detection capability and threat intelligence
 are the work of Perplexity. See https://github.com/perplexityai/bumblebee for
 the upstream project, license, and catalog provenance.
+
+honey also offers an OPTIONAL "lens" that, only if the user installs it,
+invokes the following work by NVIDIA:
+
+  SkillSpector
+  Copyright NVIDIA Corporation
+  Licensed under the Apache License, Version 2.0.
+  https://github.com/NVIDIA/skillspector
+
+    - SkillSpector provides all AI-agent-skill vulnerability detection used by
+      honey's optional `lenses/skillspector.sh`.
+
+honey neither installs nor redistributes SkillSpector; the lens is inert
+unless the user installs SkillSpector themselves and invokes its CLI at
+runtime. All agent-skill detection capability is the work of NVIDIA. See
+https://github.com/NVIDIA/skillspector for the upstream project and license.
