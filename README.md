@@ -81,6 +81,33 @@ remediation. Because it's *Local*, it can see your real filesystem (so the
 scan is meaningful) — a *Remote* cloud routine cannot, and would always
 report clean.
 
+## Optional: daily scan + desktop notification (no Claude, no Slack)
+
+Don't use Claude or Slack? Schedule the scan with your OS and get a native
+desktop notification when something needs attention — no accounts, no
+connectors.
+
+```sh
+./install-schedule.sh            # daily at noon (local); pass HH:MM to change
+./install-schedule.sh status     # is it scheduled?
+./install-schedule.sh uninstall  # remove it
+```
+
+- **macOS** → installs a per-user **launchd** agent (`com.honey.bumblebee.notify`)
+  and notifies via `osascript` (built in) or `terminal-notifier` if installed.
+- **Linux** → installs a user **cron** line and notifies via `notify-send`
+  (libnotify), provided a graphical session is active.
+
+It runs [`notify-cycle.sh`](notify-cycle.sh), which scans and — only when the
+verdict is `exposed` / `incomplete` / `scan_error` — pops a notification
+pointing at `runs/latest/`. Clean runs are silent. Triage is manual: open
+`runs/latest/findings.ndjson`.
+
+> **macOS permissions:** a scheduled job scanning all of `$HOME` may need
+> *Full Disk Access* (System Settings → Privacy & Security) to read protected
+> directories, and notifications must be allowed for the running process. If a
+> scheduled run sees fewer files than a manual one, Full Disk Access is why.
+
 ## Manual use
 
 ```sh
@@ -113,6 +140,8 @@ honey/
 ├── lib/preflight.sh  # shared dependency checks (sourced by the above)
 ├── run-scan.sh       # update repo+binary, deep-scan, write a run + manifest
 ├── daily-cycle.sh    # one cycle: run-scan, exit 0=clean / 1=needs attention
+├── notify-cycle.sh   # scan + native desktop notification (no-Claude path)
+├── install-schedule.sh # schedule notify-cycle via launchd (macOS) / cron (Linux)
 ├── routine-prompt.md # prompt for the Claude Local routine (optional path)
 ├── triage-guide.md   # analysis instructions the routine follows
 ├── runs/<TS>/        # one timestamped run per scan (gitignored — host inventory)

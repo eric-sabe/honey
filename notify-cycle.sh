@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+#
+# honey/notify-cycle.sh — scan + native desktop notification.
+#
+# For people who don't use the Claude/Slack routine. Runs daily-cycle.sh and,
+# when the run needs attention (exposed / incomplete / scan_error), fires a
+# native desktop notification pointing at the run dir. Clean runs are silent.
+#
+# This is the entry point for the local scheduler (see install-schedule.sh).
+# Triage is still manual: open the run dir, or read runs/latest/findings.ndjson.
+#
+# Notifier resolution: terminal-notifier > osascript (macOS) > notify-send
+# (Linux). If none is available it logs and exits without failing the scan.
+
+set -uo pipefail
+HONEY="${HONEY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+CYCLE_LOG="$HONEY/cycle.log"
+
+# launchd/cron hand a bare PATH; make the usual tool locations findable.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+clog() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] notify: $*" | tee -a "$CYCLE_LOG"; }
+
+# notify TITLE MESSAGE — best-effort, never fails the cycle.
+notify() {
+  local title="$1" msg="$2"
+  if command -v terminal-notifier >/dev/null 2>&1; then
+    terminal-notifier -title "$title" -message "$msg" -sound Submarine >/dev/null 2>&1 || true
+  elif command -v osascript >/dev/null 2>&1; then
+    # Escape embedded double quotes for the AppleScript string literals.
+    local t=${title//\"/\\\"} m=${msg//\"/\\\"}
+    osascript -e "display notification \"$m\" with title \"$t\" sound name \"Submarine\"" >/dev/null 2>&1 || true
+  elif command -v notify-send >/dev/null 2>&1; then
+    notify-send "$title" "$msg" >/dev/null 2>&1 || true
+  else
+    clog "no notifier found (terminal-notifier/osascript/notify-send); message: $title — $msg"
+    return 0
+  fi
+}
+
+# Run the scan cycle (data-only core). Exit 0 = clean, 1 = needs attention.
+"$HONEY/daily-cycle.sh"
+RC=$?
+
+MANIFEST="$HONEY/latest/manifest.json"
+if [ ! -f "$MANIFEST" ]; then
+  notify "🐝 Bumblebee scan FAILED" "No results produced — see $CYCLE_LOG"
+  exit 1
+fi
+
+STATUS="$(jq -r '.status' "$MANIFEST" 2>/dev/null)"
+TOTAL="$(jq -r '.findings_total' "$MANIFEST" 2>/dev/null)"
+
+case "$STATUS" in
+  clean)
+    clog "clean — no notification"
+    ;;
+  exposed)
+    notify "🚨 Bumblebee: $TOTAL exposure match(es)" "Review runs/latest/findings.ndjson"
+    clog "notified: exposed ($TOTAL)"
+    ;;
+  incomplete)
+    notify "⚠️ Bumblebee scan INCOMPLETE" "Partial coverage — raise BUMBLEBEE_MAX_DURATION"
+    clog "notified: incomplete"
+    ;;
+  scan_error)
+    notify "🚨 Bumblebee scan ERROR" "See $CYCLE_LOG and runs/latest/"
+    clog "notified: scan_error"
+    ;;
+  *)
+    notify "🐝 Bumblebee: status=$STATUS" "See runs/latest/manifest.json"
+    clog "notified: unknown status=$STATUS"
+    ;;
+esac
+
+exit "$RC"
