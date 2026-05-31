@@ -34,6 +34,16 @@ if ! command -v osv-scanner >/dev/null 2>&1; then
   emit "skipped" 0 '{}' '[]' "osv-scanner not installed — lens skipped. See README (vuln lenses)."
   echo "lens osv-scanner: not installed, skipped"; exit 0
 fi
+
+# Refresh the tool to @latest before scanning (default on; HONEY_UPDATE_LENSES=0
+# to skip). Non-fatal: on failure (offline, etc.) we keep the existing binary,
+# mirroring how run-scan.sh updates the bumblebee binary. The vuln DATA is
+# already live (OSV.dev) every scan; this keeps the BINARY current too.
+if [ "${HONEY_UPDATE_LENSES:-1}" = "1" ] && command -v go >/dev/null 2>&1; then
+  go install github.com/google/osv-scanner/cmd/osv-scanner@latest >/dev/null 2>&1 \
+    && echo "lens osv-scanner: updated to @latest" \
+    || echo "lens osv-scanner: update skipped/failed — using existing binary"
+fi
 OSV_VERSION="$(osv-scanner --version 2>/dev/null | head -1)"
 
 OFFLINE=""; [ "${HONEY_OSV_OFFLINE:-0}" = "1" ] && OFFLINE="--offline-vulnerabilities --download-offline-databases"

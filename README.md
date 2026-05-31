@@ -135,6 +135,25 @@ Both vuln lenses run static DB lookups (osv-scanner → OSV.dev with
 runs static (`--no-llm`) by default — honey's Claude routine is the semantic
 layer; set `HONEY_SKILLSPECTOR_LLM=1` to use SkillSpector's own LLM stage.
 
+### Staying current
+
+Two things can go stale — the vuln **data** and the scanner **binaries** —
+and honey treats them differently:
+
+- **Vuln data is always live.** osv-scanner and govulncheck query their
+  databases (OSV.dev, vuln.go.dev) on every scan, so a CVE published yesterday
+  is caught today with no update step.
+- **Go lens binaries auto-update.** Before scanning, honey `go install
+  @latest`s osv-scanner and govulncheck (just as it does the bumblebee binary).
+  Set `HONEY_UPDATE_LENSES=0` to disable. The update is non-fatal: if it fails
+  (offline, etc.) the lens keeps its existing binary and scans anyway. A
+  breaking upstream change surfaces as `scan_error` (visible), never a false
+  clean.
+- **skillspector is NOT auto-updated.** Its detection patterns are bundled in
+  the installed package, and its install method (pip/pipx/venv) is yours —
+  honey never mutates Python environments. Re-install it periodically per its
+  README to get new patterns.
+
 ## Optional: daily Slack triage via a Claude Local routine
 
 If you use [Claude Code](https://claude.com/claude-code) and have the Slack
@@ -241,6 +260,7 @@ After any run, `runs/latest/manifest.json` has the verdict and
 | `BUMBLEBEE_MAX_DURATION` | `30m` | bumblebee scan time cap |
 | `HONEY_PROJECT_ROOTS` | `~/git:~/code:~/Developer:~/src` | where the vuln lenses (osv-scanner, govulncheck) look for projects |
 | `HONEY_SKILL_ROOTS` | skill dirs under `~/.claude` | where the skillspector lens looks for agent skills |
+| `HONEY_UPDATE_LENSES` | `1` | `go install @latest` the Go lens binaries (osv-scanner, govulncheck) before scanning; `0` to skip |
 | `HONEY_OSV_OFFLINE` | `0` | osv-scanner: use local vuln DBs instead of OSV.dev |
 | `HONEY_OSV_INCLUDE_GO_STDLIB` | `0` | osv-scanner: keep Go stdlib advisories (default defers them to govulncheck) |
 | `HONEY_SKILLSPECTOR_LLM` | `0` | skillspector: enable its own LLM stage (default static `--no-llm`) |

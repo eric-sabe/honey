@@ -43,6 +43,14 @@ if ! command -v skillspector >/dev/null 2>&1; then
 fi
 SS_VERSION="$(skillspector --version 2>/dev/null | head -1)"
 
+# NOTE on freshness: unlike the Go lenses (which honey can `go install @latest`)
+# and unlike osv-scanner/govulncheck (whose vuln DATA is live), SkillSpector's
+# detection PATTERNS are bundled in the installed package — frozen at install.
+# honey will not auto-update it because its install method is the user's choice
+# (pip / pipx / venv) and honey never mutates Python environments. Refresh it
+# yourself periodically per its README to get new patterns. (HONEY_UPDATE_LENSES
+# governs the Go lenses; it deliberately does not touch this one.)
+
 LLM_FLAG="--no-llm"
 [ "${HONEY_SKILLSPECTOR_LLM:-0}" = "1" ] && LLM_FLAG=""
 

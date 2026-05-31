@@ -38,6 +38,15 @@ if ! command -v govulncheck >/dev/null 2>&1; then
   echo "lens govulncheck: not installed, skipped"; exit 0
 fi
 command -v go >/dev/null 2>&1 || { emit "skipped" 0 '{}' '[]' "go not installed — govulncheck needs it; skipped."; echo "lens govulncheck: go missing, skipped"; exit 0; }
+
+# Refresh to @latest before scanning (default on; HONEY_UPDATE_LENSES=0 skips).
+# Non-fatal — keeps the existing binary on failure. Vuln DATA is already live
+# (vuln.go.dev) each scan; this keeps the BINARY current too.
+if [ "${HONEY_UPDATE_LENSES:-1}" = "1" ]; then
+  go install golang.org/x/vuln/cmd/govulncheck@latest >/dev/null 2>&1 \
+    && echo "lens govulncheck: updated to @latest" \
+    || echo "lens govulncheck: update skipped/failed — using existing binary"
+fi
 GV_VERSION="$(govulncheck -version 2>/dev/null | head -1)"
 
 # Discover Go modules (dirs containing go.mod) under the project roots.
