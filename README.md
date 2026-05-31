@@ -181,10 +181,14 @@ config:
 - `daily-cycle.sh` sets its own PATH (including `~/go/bin` and `~/.local/bin`),
   so the lens tools resolve even though a Local routine starts with a bare
   environment.
-- The vuln lenses default to scanning `~/git:~/code:~/Developer:~/src`. If your
-  projects live elsewhere, add a line to the routine prompt before STEP 1, e.g.
-  `Set HONEY_PROJECT_ROOTS=/my/projects:/other before running the scripts.`
-  (A Local routine does not inherit env vars from your shell.)
+- The vuln lenses default to scanning `~/git:~/code:~/Developer:~/src`. A Local
+  routine does not inherit your shell's env vars, so if your projects live
+  elsewhere, persist it in `honey.conf` (add
+  `export HONEY_PROJECT_ROOTS="${HONEY_PROJECT_ROOTS:-/my/projects:/other}"`) —
+  every script, including the routine's, reads that. (Or add a `Set
+  HONEY_PROJECT_ROOTS=… before running the scripts.` line to the prompt.)
+  Same applies to a non-default `BUMBLEBEE_REPO`, which `setup.sh` persists for
+  you — see [Configuration](#configuration-env-vars-all-optional).
 
 To triage by hand in a chat instead ("triage the latest honey run"), see
 [`triage-guide.md`](triage-guide.md).
