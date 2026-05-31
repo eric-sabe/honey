@@ -71,15 +71,18 @@ Claude auth and connectors.
 
 1. In the Routines hub: **New routine → Local**.
 2. Paste the prompt from [`routine-prompt.md`](routine-prompt.md) (it runs
-   `daily-cycle.sh`, reads the verdict, and DMs you the result).
+   `daily-cycle.sh` to scan, `report.sh` for the factual baseline, then DMs
+   you an enriched write-up). Set `HONEY_DIR` in it to your checkout path.
 3. Set the schedule (e.g. daily at noon).
 
-The routine follows the analysis instructions in
-[`triage-guide.md`](triage-guide.md). On a clean run you get a one-line
-all-clear; on an `exposed` run you get per-finding triage with drafted
-remediation. Because it's *Local*, it can see your real filesystem (so the
-scan is meaningful) — a *Remote* cloud routine cannot, and would always
-report clean.
+On a clean run you get a one-line all-clear; on an `exposed` run you get
+per-finding triage with drafted remediation, layering Claude's tailored
+judgment on top of `report.sh`'s deterministic facts. Because it's *Local*,
+it can see your real filesystem (so the scan is meaningful) — a *Remote* cloud
+routine cannot, and would always report clean.
+
+To triage by hand in a chat instead ("triage the latest honey run"), see
+[`triage-guide.md`](triage-guide.md).
 
 ## Optional: daily scan + desktop notification (no Claude, no Slack)
 
@@ -159,8 +162,8 @@ honey/
 ├── notify-cycle.sh   # scan + native desktop notification (no-Claude path)
 ├── report.sh         # deterministic triage report from a run (no AI needed)
 ├── install-schedule.sh # schedule notify-cycle via launchd (macOS) / cron (Linux)
-├── routine-prompt.md # prompt for the Claude Local routine (optional path)
-├── triage-guide.md   # analysis instructions the routine follows
+├── routine-prompt.md # prompt for the Claude Local routine (scheduled path)
+├── triage-guide.md   # guide for triaging a run by hand in a chat
 ├── runs/<TS>/        # one timestamped run per scan (gitignored — host inventory)
 └── latest -> runs/…  # symlink to the most recent run (gitignored)
 ```

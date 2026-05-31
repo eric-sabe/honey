@@ -1,40 +1,42 @@
-You are triaging the results of a bumblebee supply-chain exposure scan on
-this macOS developer machine. bumblebee is a read-only inventory collector;
-it flags on-disk package/extension/version metadata that exactly matches a
-known-compromised entry in a threat-intelligence catalog.
+# Triage guide (interactive)
 
-A scan run directory is at the path given below. Read these files in it:
-- `manifest.json`   — run verdict, counts, and metadata (start here).
-- `findings.ndjson` — one JSON finding record per line (may be empty).
-- `summary.json`    — the scan_summary record (coverage stats).
-- `update.log`      — repo/binary update + scan log (read on errors).
-- `diagnostics.ndjson` — scanner diagnostics (read on errors/timeouts).
+Use this to triage a honey scan by hand in a Claude chat — e.g. "triage the
+latest honey run". The scheduled Local routine uses its own prompt
+([`routine-prompt.md`](routine-prompt.md)); this is the conversational
+equivalent. All three paths share one factual baseline: [`report.sh`](report.sh).
 
-The threat-intel catalogs that were matched live under the `catalog_dir`
-named in the manifest; each finding's `catalog_id`/`catalog_name` maps to an
-entry in one of those JSON files. Read the relevant catalog entry to enrich
-your advice with the campaign source.
+---
 
-Produce a concise markdown triage report. Handle the run's `status`:
+Triage a bumblebee supply-chain exposure scan. bumblebee is a read-only
+inventory collector; it flags on-disk package/extension/version metadata that
+exactly matches a known-compromised entry in a threat-intelligence catalog.
 
-**exposed** (findings_total > 0): This is the case that matters. For EACH
-finding, give:
-- Package + version, ecosystem, severity, and the campaign (catalog_name).
-- Where it is: `project_path` / `source_file` and `root_kind`.
-- `confidence` and what it means (high = exact installed version; low =
-  config/spec reference, not proof of an installed build).
-- Concrete drafted remediation for that ecosystem — exact commands to pin,
-  remove, or upgrade away from the bad version (npm/pnpm/yarn, pip, go,
-  bundler, composer, brew, or extension uninstall). DRAFT ONLY — do not run
-  anything that changes state. Note any manual verification needed.
-Then a short "what to do first" ordering by severity + confidence.
+1. Get the facts. Run `./report.sh [RUN_DIR]` (defaults to the `latest`
+   symlink). It prints the verdict, coverage, and — when exposed — every match
+   grouped by severity with location, confidence, and standard per-ecosystem
+   remediation. Treat this as ground truth; don't contradict it or invent
+   findings beyond it.
 
-**incomplete** (scan_completed=false): the walk hit --max-duration, so
-coverage is partial and absence of findings is NOT all-clear. Say so, and
-recommend re-running with a larger BUMBLEBEE_MAX_DURATION or a narrower root.
+2. For detail beyond the report, read the run dir:
+   - `manifest.json`   — verdict, counts, metadata.
+   - `findings.ndjson` — one finding per line.
+   - `summary.json`    — coverage stats.
+   - `update.log` / `diagnostics.ndjson` — read on errors/timeouts.
+   Each finding's `catalog_id` maps to an entry under the manifest's
+   `catalog_dir`; read it to cite the campaign source.
 
-**scan_error** (scan_exit_code != 0): something failed. Read update.log and
-diagnostics.ndjson, state the likely cause, and give the fix.
+3. Enrich beyond the static report:
+   - Weigh `source_type` / `root_kind` — direct dependency vs. transitive or
+     incidental — and adjust urgency.
+   - If a finding is in a real project (`project_path`), tailor remediation to
+     that project's lockfile/manager rather than the generic command.
+   - Reconcile `confidence`: `high` = exact installed version (act); `low` =
+     config/spec reference, not proof of an installed build (verify first).
+   - `incomplete` (scan_completed=false): coverage is partial — absence of
+     matches is NOT all-clear. Recommend a larger `BUMBLEBEE_MAX_DURATION` or
+     narrower root.
+   - `scan_error`: read the logs, state the likely cause and the fix.
 
-Be specific and brief. Cite file paths. Do not invent findings beyond what
-the records show. End with a one-line bottom-line recommendation.
+Keep remediation labeled "run manually" — never run state-changing commands.
+Be specific, cite file paths, and end with a one-line bottom-line
+recommendation ordered by severity then confidence.
