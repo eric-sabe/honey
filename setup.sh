@@ -15,6 +15,9 @@
 
 set -uo pipefail
 HONEY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Did the user pin BUMBLEBEE_REPO explicitly (env or honey.conf) BEFORE we apply
+# the default in preflight? If so, we respect it and skip the discovery prompt.
+[ -n "${BUMBLEBEE_REPO:-}" ] && BUMBLEBEE_REPO_EXPLICIT=1 || BUMBLEBEE_REPO_EXPLICIT=""
 . "$HONEY_DIR/lib/preflight.sh"
 
 echo "honey setup"
@@ -31,7 +34,52 @@ if [ "$need_tool" -ne 0 ]; then
   exit 1
 fi
 
+# Persist a setting to honey.conf so it survives across shells AND bare-env
+# Local-routine / cron runs (which don't inherit your interactive environment).
+# Written as `export VAR="${VAR:-value}"` to preserve env-var > conf > default.
+CONF="$HONEY_DIR/honey.conf"
+persist() {  # persist VAR VALUE
+  local var="$1" val="$2"
+  [ -f "$CONF" ] || { printf '# honey.conf — machine-specific config (gitignored). Written by setup.sh.\n' >"$CONF"; }
+  # Drop any prior line for this var, then append the new one.
+  grep -v "^export $var=" "$CONF" >"$CONF.tmp" 2>/dev/null || :
+  mv "$CONF.tmp" "$CONF"
+  # shellcheck disable=SC2016  # the ${VAR:-...} is literal text written to honey.conf, not for expansion here
+  printf 'export %s="${%s:-%s}"\n' "$var" "$var" "$val" >>"$CONF"
+  ok "persisted $var=$val to honey.conf"
+}
+
 # --- 2. bumblebee checkout (for threat_intel catalogs) ----------------------
+# If BUMBLEBEE_REPO was already set (env or honey.conf), respect it. Otherwise,
+# if an existing clone is found at a non-default path, offer to use it rather
+# than cloning a duplicate; fall back to the default location.
+bb_has_catalogs() { [ -d "$1/threat_intel" ] && ls "$1"/threat_intel/*.json >/dev/null 2>&1; }
+
+if [ -z "${BUMBLEBEE_REPO_EXPLICIT:-}" ] && [ ! -f "$CONF" ] && ! bb_has_catalogs "$BUMBLEBEE_REPO"; then
+  # No persisted/explicit choice yet, and nothing at the default. Look for an
+  # existing clone elsewhere so we don't silently create a second copy.
+  echo "  looking for an existing bumblebee checkout ..."
+  FOUND=""
+  while IFS= read -r cand; do
+    d="$(dirname "$cand")"; bb_has_catalogs "$d" && { FOUND="$d"; break; }
+  done < <(find "$HOME" -maxdepth 6 -type d -name threat_intel -path '*/bumblebee/*' 2>/dev/null)
+  if [ -n "$FOUND" ] && [ "$FOUND" != "$BUMBLEBEE_REPO" ]; then
+    echo
+    echo "  Found an existing bumblebee clone at:"
+    echo "    $FOUND"
+    echo "  honey's default is: $BUMBLEBEE_REPO"
+    if [ -t 0 ]; then
+      printf "  Use the existing clone instead of cloning a new one? [Y/n] "
+      read -r ans
+      case "$ans" in [Nn]*) : ;; *) BUMBLEBEE_REPO="$FOUND"; persist BUMBLEBEE_REPO "$FOUND" ;; esac
+    else
+      # Non-interactive (CI, piped): prefer the found clone, persist it.
+      BUMBLEBEE_REPO="$FOUND"; persist BUMBLEBEE_REPO "$FOUND"
+      echo "  (non-interactive: using the existing clone)"
+    fi
+  fi
+fi
+
 CAT="$BUMBLEBEE_REPO/threat_intel"
 CAT_JSONS=("$CAT"/*.json)
 if [ -d "$CAT" ] && [ -e "${CAT_JSONS[0]}" ]; then

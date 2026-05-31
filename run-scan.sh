@@ -25,6 +25,10 @@ set -uo pipefail
 # ----------------------------------------------------------------------------
 # HONEY defaults to this script's own directory; override to relocate output.
 HONEY="${HONEY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+# Load persisted config (e.g. a non-default BUMBLEBEE_REPO) before defaults.
+# Precedence: env var > honey.conf > built-in default.
+# shellcheck source=lib/load-config.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/load-config.sh"
 # Path to your local bumblebee checkout (its threat_intel/ catalogs are used).
 REPO="${BUMBLEBEE_REPO:-$HOME/git/bumblebee}"
 SCAN_ROOT="${BUMBLEBEE_SCAN_ROOT:-$HOME}"

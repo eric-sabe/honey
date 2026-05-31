@@ -16,6 +16,10 @@ set -uo pipefail
 HONEY="${HONEY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 CYCLE_LOG="$HONEY/cycle.log"
 
+# Load persisted config (non-default paths) for bare-env scheduler/routine runs.
+# shellcheck source=lib/load-config.sh
+. "$HONEY/lib/load-config.sh"
+
 # launchd/cron hand a bare PATH; make the usual tool locations findable.
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 

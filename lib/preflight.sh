@@ -11,6 +11,11 @@
 HONEY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HONEY_ROOT="$(cd "$HONEY_LIB_DIR/.." && pwd)"
 
+# Load persisted machine-specific config (e.g. a non-default BUMBLEBEE_REPO)
+# before applying built-in defaults. Precedence: env var > honey.conf > default.
+# shellcheck source=lib/load-config.sh
+. "$HONEY_LIB_DIR/load-config.sh"
+
 : "${HONEY:=$HONEY_ROOT}"
 : "${BUMBLEBEE_REPO:=$HOME/git/bumblebee}"
 : "${BUMBLEBEE_SCAN_ROOT:=$HOME}"

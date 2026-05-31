@@ -20,6 +20,11 @@ set -uo pipefail
 HONEY="${HONEY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 CYCLE_LOG="$HONEY/cycle.log"
 
+# Load persisted config (e.g. non-default BUMBLEBEE_REPO / HONEY_PROJECT_ROOTS)
+# so a bare-env Local routine or cron job picks it up. env var > honey.conf > default.
+# shellcheck source=lib/load-config.sh
+. "$HONEY/lib/load-config.sh"
+
 # A scheduler / Local routine may hand us a bare PATH. Ensure the dirs that
 # hold the scanners are findable BEFORE we invoke run-scan and the lenses —
 # otherwise an installed lens (osv-scanner/govulncheck in ~/go/bin,

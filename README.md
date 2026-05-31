@@ -252,6 +252,20 @@ After any run, `runs/latest/manifest.json` has the verdict and
 
 ## Configuration (env vars, all optional)
 
+All settings are environment variables with working defaults — a default
+install needs none of them. Set them inline (`HONEY_PROJECT_ROOTS=… ./daily-cycle.sh`)
+or export them in your shell.
+
+**Persisting a setting (`honey.conf`).** Env vars don't survive across shells,
+and a Claude *Local* routine / cron job starts with a bare environment that
+won't see them. For settings that must stick — most often a non-default
+`BUMBLEBEE_REPO` — `setup.sh` writes a gitignored `honey.conf` at the repo
+root that every script sources. If `setup.sh` finds an existing bumblebee
+checkout at a non-default path, it offers to use it and persists the choice
+there (rather than cloning a duplicate). Precedence is **env var > honey.conf
+> built-in default**, so an explicit env var still overrides the file for a
+one-off run. You can also hand-edit `honey.conf` — one `export VAR=…` per line.
+
 | Var | Default | Purpose |
 |---|---|---|
 | `HONEY` | the scripts' own directory | where runs are written |
