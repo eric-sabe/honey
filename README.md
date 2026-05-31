@@ -100,8 +100,24 @@ connectors.
 
 It runs [`notify-cycle.sh`](notify-cycle.sh), which scans and — only when the
 verdict is `exposed` / `incomplete` / `scan_error` — pops a notification
-pointing at `runs/latest/`. Clean runs are silent. Triage is manual: open
-`runs/latest/findings.ndjson`.
+pointing at `runs/latest/report.txt`. Clean runs are silent.
+
+**You still get analysis without Claude.** [`report.sh`](report.sh) renders a
+readable triage report straight from the structured findings — verdict,
+coverage, and each match grouped by severity with its location, confidence,
+and standard per-ecosystem remediation steps (npm/pip/go/bundler/composer/
+brew/extension). The notify path writes it to `runs/latest/report.txt`
+automatically; you can also run it anytime:
+
+```sh
+./report.sh                 # report on the latest run
+./report.sh runs/<TS>       # report on a specific run
+```
+
+The Claude routine produces richer, tailored prose and reasons about your
+specific project layout, but the facts and standard fixes are all in
+`report.sh` deterministically — so the no-Claude path is genuinely
+actionable, not just a "something matched" ping.
 
 > **macOS permissions:** a scheduled job scanning all of `$HOME` may need
 > *Full Disk Access* (System Settings → Privacy & Security) to read protected
@@ -141,6 +157,7 @@ honey/
 ├── run-scan.sh       # update repo+binary, deep-scan, write a run + manifest
 ├── daily-cycle.sh    # one cycle: run-scan, exit 0=clean / 1=needs attention
 ├── notify-cycle.sh   # scan + native desktop notification (no-Claude path)
+├── report.sh         # deterministic triage report from a run (no AI needed)
 ├── install-schedule.sh # schedule notify-cycle via launchd (macOS) / cron (Linux)
 ├── routine-prompt.md # prompt for the Claude Local routine (optional path)
 ├── triage-guide.md   # analysis instructions the routine follows

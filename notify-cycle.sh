@@ -51,13 +51,21 @@ fi
 STATUS="$(jq -r '.status' "$MANIFEST" 2>/dev/null)"
 TOTAL="$(jq -r '.findings_total' "$MANIFEST" 2>/dev/null)"
 
+# Deterministic analysis (no AI) → saved beside the run and appended to the
+# cycle log, so a scheduled run leaves a full report behind, not just a ping.
+REPORT="$HONEY/latest/report.txt"
+if [ "$STATUS" != "clean" ]; then
+  TERM=dumb "$HONEY/report.sh" "$HONEY/latest" >"$REPORT" 2>/dev/null || true
+  [ -s "$REPORT" ] && { echo "----- report ($STATUS) -----"; cat "$REPORT"; echo "----------------------------"; } >>"$CYCLE_LOG"
+fi
+
 case "$STATUS" in
   clean)
     clog "clean — no notification"
     ;;
   exposed)
-    notify "🚨 Bumblebee: $TOTAL exposure match(es)" "Review runs/latest/findings.ndjson"
-    clog "notified: exposed ($TOTAL)"
+    notify "🚨 Bumblebee: $TOTAL exposure match(es)" "Report: runs/latest/report.txt"
+    clog "notified: exposed ($TOTAL) — report at $REPORT"
     ;;
   incomplete)
     notify "⚠️ Bumblebee scan INCOMPLETE" "Partial coverage — raise BUMBLEBEE_MAX_DURATION"
