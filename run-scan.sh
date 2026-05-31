@@ -35,6 +35,25 @@ GO_PKG="github.com/perplexityai/bumblebee/cmd/bumblebee@latest"
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
 # ----------------------------------------------------------------------------
+# Preflight: fail fast (with guidance) on the things we can't self-heal.
+# The binary is auto-installed below, so we don't block on it here; but a
+# missing jq or absent catalog checkout would silently ruin the run.
+# ----------------------------------------------------------------------------
+if ! command -v jq >/dev/null 2>&1; then
+  echo "honey: jq not found on PATH — required to build scan results." >&2
+  echo "  fix: macOS 'brew install jq' · Debian/Ubuntu 'sudo apt-get install jq'" >&2
+  echo "  then re-run. (./doctor.sh checks all dependencies.)" >&2
+  exit 1
+fi
+if [ ! -d "$BUMBLEBEE_REPO/threat_intel" ] || ! ls "$BUMBLEBEE_REPO"/threat_intel/*.json >/dev/null 2>&1; then
+  echo "honey: no threat_intel catalogs at $BUMBLEBEE_REPO/threat_intel" >&2
+  echo "  the bumblebee binary has no catalogs — you need a git checkout:" >&2
+  echo "    git clone https://github.com/perplexityai/bumblebee \"$BUMBLEBEE_REPO\"" >&2
+  echo "  or set BUMBLEBEE_REPO to an existing clone. (Run ./setup.sh to do this for you.)" >&2
+  exit 1
+fi
+
+# ----------------------------------------------------------------------------
 # Per-run setup.
 # ----------------------------------------------------------------------------
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
