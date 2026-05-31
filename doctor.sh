@@ -36,6 +36,20 @@ if [ -d "$HONEY/lenses" ] && ls "$HONEY"/lenses/*.sh >/dev/null 2>&1; then
           bad "lens $lname inactive — skillspector not installed (optional)"
           hint "agent-skill scanning; install per https://github.com/NVIDIA/skillspector then it activates automatically"
         fi ;;
+      osv-scanner)
+        if command -v osv-scanner >/dev/null 2>&1; then
+          ok "lens $lname active ($(osv-scanner --version 2>/dev/null | head -1))"
+        else
+          bad "lens $lname inactive — osv-scanner not installed (optional)"
+          hint "multi-ecosystem lockfile vuln scanning; install: go install github.com/google/osv-scanner/cmd/osv-scanner@latest"
+        fi ;;
+      govulncheck)
+        if command -v govulncheck >/dev/null 2>&1; then
+          ok "lens $lname active ($(govulncheck -version 2>/dev/null | head -1))"
+        else
+          bad "lens $lname inactive — govulncheck not installed (optional)"
+          hint "Go reachability-aware vuln scanning; install: go install golang.org/x/vuln/cmd/govulncheck@latest"
+        fi ;;
       *)
         if command -v "$lname" >/dev/null 2>&1; then ok "lens $lname active"; else bad "lens $lname inactive (optional tool '$lname' not installed)"; fi ;;
     esac

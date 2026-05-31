@@ -41,3 +41,25 @@ honey neither installs nor redistributes SkillSpector; the lens is inert
 unless the user installs SkillSpector themselves and invokes its CLI at
 runtime. All agent-skill detection capability is the work of NVIDIA. See
 https://github.com/NVIDIA/skillspector for the upstream project and license.
+
+honey offers two further OPTIONAL vulnerability-scanning lenses that, only if
+the user installs the respective tool, invoke:
+
+  osv-scanner
+  Copyright Google LLC / the OSV-Scanner authors
+  Licensed under the Apache License, Version 2.0.
+  https://github.com/google/osv-scanner
+    - Used by honey's optional `lenses/osv-scanner.sh` for multi-ecosystem
+      lockfile/manifest vulnerability scanning against the OSV database.
+
+  govulncheck
+  Copyright The Go Authors
+  Licensed under a BSD-style license.
+  https://golang.org/x/vuln/cmd/govulncheck
+    - Used by honey's optional `lenses/govulncheck.sh` for Go
+      reachability-aware vulnerability scanning against the Go vuln database.
+
+As with the other lenses, honey neither installs nor redistributes these
+tools; each lens is inert unless the user installs the tool themselves. All
+vulnerability-detection capability is the work of the respective upstream
+projects.

@@ -83,27 +83,37 @@ bumblebee-only). The cycle's overall verdict is the **worst** across bumblebee
 and every active lens — a lens can escalate concern, never mask a bumblebee
 finding.
 
-### Bundled lens: `skillspector` (AI agent skills)
+Every lens is **opt-in**: honey never installs a lens's tool for you, and an
+uninstalled lens is fully inert. Install the tool, and the lens activates on
+the next run. `./doctor.sh` shows which lenses are active.
 
-[NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) scans installed
-AI agent skills (`SKILL.md` + bundled scripts, as loaded by Claude Code, Codex,
-Gemini CLI, etc.) for prompt injection, data exfiltration, excessive agency,
-tool poisoning, and other agent-specific risks — a surface bumblebee's
-package/catalog model doesn't cover. honey complements it: bumblebee answers
-*"do I have a known-compromised package?"*, skillspector answers *"is this
-skill, which no catalog knows yet, behaving maliciously?"*
+| Lens | Tool | Covers | Install |
+|---|---|---|---|
+| `skillspector` | [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) | AI agent skills (`SKILL.md` + scripts): prompt injection, data exfil, excessive agency, tool poisoning | per its README (Python 3.12+) |
+| `osv-scanner` | [Google/OSV osv-scanner](https://github.com/google/osv-scanner) | Known vulns in lockfiles/manifests across **all** ecosystems (npm, pypi, cargo, go, …) | `go install github.com/google/osv-scanner/cmd/osv-scanner@latest` |
+| `govulncheck` | [Go vuln team govulncheck](https://golang.org/x/vuln) | Go vulns that your code **actually calls** (reachability-aware → far less noise) | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
 
-This lens is **opt-in** and adds no dependency unless you install SkillSpector
-yourself (it needs Python 3.12+; honey never installs it for you). Once
-`skillspector` is on your `PATH`, the lens activates automatically and scans
-the skill directories under `~/.claude` (override with `HONEY_SKILL_ROOTS`, a
-colon-separated list). It runs SkillSpector's **static analysis** (`--no-llm`)
-by default — deterministic, no API keys; honey's own Claude routine is the
-semantic layer. Set `HONEY_SKILLSPECTOR_LLM=1` to enable SkillSpector's LLM
-stage instead.
+**What each answers.** bumblebee: *"do I have a known-compromised package?"*
+(exact catalog match). skillspector: *"is this agent skill behaving
+maliciously?"* (content analysis). osv-scanner: *"do my dependencies have known
+CVEs?"* (broad). govulncheck: *"do I actually reach a vulnerable Go function?"*
+(deep, low-noise). Together they cover reactive, proactive, breadth, and depth.
 
-`./doctor.sh` shows which lenses are active. A lens being inactive never fails
-the core checks.
+**Where the vuln lenses scan.** osv-scanner and govulncheck scan your *project*
+directories, not all of `$HOME`. Set `HONEY_PROJECT_ROOTS` (colon-separated;
+default `~/git:~/code:~/Developer:~/src`) to control this. The skillspector
+lens scans skill dirs under `~/.claude` (override with `HONEY_SKILL_ROOTS`).
+
+**Go division of labor.** osv-scanner and govulncheck overlap on Go. By
+default osv-scanner **defers Go stdlib advisories to govulncheck** — otherwise
+it flags every stdlib CVE for your `go` directive (often dozens, unreachable,
+no CVSS). govulncheck reports only the stdlib vulns you actually call. Set
+`HONEY_OSV_INCLUDE_GO_STDLIB=1` to keep them in osv-scanner anyway.
+
+Both vuln lenses run static DB lookups (osv-scanner → OSV.dev with
+`HONEY_OSV_OFFLINE=1` for local DBs; govulncheck → vuln.go.dev). skillspector
+runs static (`--no-llm`) by default — honey's Claude routine is the semantic
+layer; set `HONEY_SKILLSPECTOR_LLM=1` to use SkillSpector's own LLM stage.
 
 ## Optional: daily Slack triage via a Claude Local routine
 
@@ -190,8 +200,13 @@ After any run, `runs/latest/manifest.json` has the verdict and
 |---|---|---|
 | `HONEY` | the scripts' own directory | where runs are written |
 | `BUMBLEBEE_REPO` | `$HOME/git/bumblebee` | bumblebee checkout (for catalogs) |
-| `BUMBLEBEE_SCAN_ROOT` | `$HOME` | what to scan |
-| `BUMBLEBEE_MAX_DURATION` | `30m` | scan time cap |
+| `BUMBLEBEE_SCAN_ROOT` | `$HOME` | what bumblebee scans |
+| `BUMBLEBEE_MAX_DURATION` | `30m` | bumblebee scan time cap |
+| `HONEY_PROJECT_ROOTS` | `~/git:~/code:~/Developer:~/src` | where the vuln lenses (osv-scanner, govulncheck) look for projects |
+| `HONEY_SKILL_ROOTS` | skill dirs under `~/.claude` | where the skillspector lens looks for agent skills |
+| `HONEY_OSV_OFFLINE` | `0` | osv-scanner: use local vuln DBs instead of OSV.dev |
+| `HONEY_OSV_INCLUDE_GO_STDLIB` | `0` | osv-scanner: keep Go stdlib advisories (default defers them to govulncheck) |
+| `HONEY_SKILLSPECTOR_LLM` | `0` | skillspector: enable its own LLM stage (default static `--no-llm`) |
 
 ## Layout
 
@@ -205,7 +220,10 @@ honey/
 ├── notify-cycle.sh   # scan + native desktop notification (no-Claude path)
 ├── report.sh         # deterministic triage report (bumblebee + all lenses; no AI)
 ├── install-schedule.sh # schedule notify-cycle via launchd (macOS) / cron (Linux)
-├── lenses/           # optional additional scanners (e.g. skillspector.sh)
+├── lenses/           # optional additional scanners, each self-skips if its tool is absent
+│   ├── skillspector.sh  # AI agent skills (NVIDIA SkillSpector)
+│   ├── osv-scanner.sh   # multi-ecosystem lockfile vulns (Google/OSV)
+│   └── govulncheck.sh   # Go reachability-aware vulns (Go vuln team)
 ├── routine-prompt.md # prompt for the Claude Local routine (scheduled path)
 ├── triage-guide.md   # guide for triaging a run by hand in a chat
 ├── runs/<TS>/        # one timestamped run per scan (gitignored — host inventory)
