@@ -8,6 +8,7 @@ cycle.log
 
 # Machine-specific config written by setup.sh (e.g. a non-default BUMBLEBEE_REPO).
 honey.conf
+honey.conf.ps1
 
 # Local secrets, if you ever add any (e.g. Slack webhook/token).
 secrets.env

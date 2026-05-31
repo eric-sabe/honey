@@ -28,3 +28,18 @@ jobs:
 
       - name: shellcheck
         run: shellcheck *.sh lib/*.sh lenses/*.sh
+
+  lint-powershell:
+    name: PSScriptAnalyzer (Windows variant)
+    runs-on: ubuntu-latest   # pwsh + PSScriptAnalyzer are cross-platform
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PSScriptAnalyzer on win/
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          $r = Invoke-ScriptAnalyzer -Path ./win -Recurse -Settings ./win/PSScriptAnalyzerSettings.psd1
+          if ($r) { $r | Format-Table RuleName,ScriptName,Line,Message -Auto -Wrap; throw "$($r.Count) PSScriptAnalyzer finding(s)" }
+          else { "PSScriptAnalyzer clean" }
