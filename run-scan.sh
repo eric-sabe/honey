@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+#
+# honey/run-scan.sh — regular bumblebee exposure scan cycle.
+#
+# 1. Updates the bumblebee repo clone (fresh threat_intel/ catalogs via PR).
+# 2. Updates the bumblebee binary (go install ...@latest).
+# 3. Runs a deep exposure scan of $HOME against the threat_intel catalogs.
+# 4. Saves timestamped, self-contained results under honey/runs/<ts>/ and
+#    points honey/latest at the newest run.
+#
+# Results live OUTSIDE the repo clone and OUTSIDE ~/go, so neither the
+# `git pull` nor the `go install` can delete or overwrite them.
+#
+# A local Claude routine is expected to read:
+#   <HONEY>/latest/manifest.json   (verdict + finding counts)
+#   <HONEY>/latest/findings.ndjson (the matched records, if any)
+#
+# Designed to be safe under cron/launchd: it sets its own PATH and never
+# aborts the scan because an update step had a transient failure.
+
+set -uo pipefail
+
+# ----------------------------------------------------------------------------
+# Config (override via environment if desired).
+# ----------------------------------------------------------------------------
+# HONEY defaults to this script's own directory; override to relocate output.
+HONEY="${HONEY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+# Path to your local bumblebee checkout (its threat_intel/ catalogs are used).
+REPO="${BUMBLEBEE_REPO:-$HOME/git/bumblebee}"
+SCAN_ROOT="${BUMBLEBEE_SCAN_ROOT:-$HOME}"
+MAX_DURATION="${BUMBLEBEE_MAX_DURATION:-30m}"
+GO_PKG="github.com/perplexityai/bumblebee/cmd/bumblebee@latest"
+
+# Cron/launchd start with a bare PATH; make sure go + the binary are findable.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+# ----------------------------------------------------------------------------
+# Per-run setup.
+# ----------------------------------------------------------------------------
+TS="$(date -u +%Y%m%dT%H%M%SZ)"
+RUN_DIR="$HONEY/runs/$TS"
+mkdir -p "$RUN_DIR"
+
+LOG="$RUN_DIR/update.log"
+RECORDS="$RUN_DIR/records.ndjson"
+DIAGS="$RUN_DIR/diagnostics.ndjson"
+FINDINGS="$RUN_DIR/findings.ndjson"
+SUMMARY="$RUN_DIR/summary.json"
+MANIFEST="$RUN_DIR/manifest.json"
+
+CATALOG_DIR="$REPO/threat_intel"
+
+log() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$LOG"; }
+
+log "honey run $TS starting"
+log "repo=$REPO  scan_root=$SCAN_ROOT  catalog=$CATALOG_DIR"
+
+# ----------------------------------------------------------------------------
+# 1. Update the repo clone (for fresh threat_intel catalogs).
+# ----------------------------------------------------------------------------
+REPO_UPDATED=false
+if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
+  if git -C "$REPO" fetch --quiet origin >>"$LOG" 2>&1 \
+     && git -C "$REPO" pull --ff-only --quiet >>"$LOG" 2>&1; then
+    REPO_UPDATED=true
+    log "repo updated (ff-only pull ok)"
+  else
+    log "WARN repo update failed (continuing with existing catalogs)"
+  fi
+else
+  log "WARN $REPO is not a git repo (continuing with existing catalogs)"
+fi
+REPO_COMMIT="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+# ----------------------------------------------------------------------------
+# 2. Update the binary.
+# ----------------------------------------------------------------------------
+BINARY_UPDATED=false
+if command -v go >/dev/null 2>&1; then
+  if go install "$GO_PKG" >>"$LOG" 2>&1; then
+    BINARY_UPDATED=true
+    log "binary updated (go install $GO_PKG)"
+  else
+    log "WARN go install failed (continuing with existing binary)"
+  fi
+else
+  log "WARN go not found on PATH (continuing with existing binary)"
+fi
+
+BIN="$(command -v bumblebee || true)"
+if [ -z "$BIN" ]; then
+  log "ERROR bumblebee binary not found; aborting"
+  printf '{"run_id":"%s","status":"scan_error","error":"bumblebee binary not found"}\n' "$TS" >"$MANIFEST"
+  ln -sfn "$RUN_DIR" "$HONEY/latest"
+  exit 1
+fi
+SCANNER_VERSION="$("$BIN" version 2>/dev/null | head -1 | awk '{print $2}')"
+log "using binary $BIN ($SCANNER_VERSION)"
+
+# ----------------------------------------------------------------------------
+# 3. Run the deep exposure scan.
+# ----------------------------------------------------------------------------
+log "scanning $SCAN_ROOT (max-duration $MAX_DURATION) ..."
+"$BIN" scan \
+  --profile deep \
+  --root "$SCAN_ROOT" \
+  --exposure-catalog "$CATALOG_DIR" \
+  --findings-only \
+  --max-duration "$MAX_DURATION" \
+  >"$RECORDS" 2>"$DIAGS"
+SCAN_EXIT=$?
+log "scan exit code: $SCAN_EXIT"
+
+# ----------------------------------------------------------------------------
+# 4. Split output and build the manifest.
+# ----------------------------------------------------------------------------
+# stdout carries finding + scan_summary records; with --findings-only a clean
+# scan emits only the scan_summary, which is the correct "all clear" signal.
+jq -c 'select(.record_type=="finding")'      "$RECORDS" >"$FINDINGS" 2>/dev/null || : >"$FINDINGS"
+jq -c 'select(.record_type=="scan_summary")' "$RECORDS" >"$SUMMARY"  2>/dev/null || : >"$SUMMARY"
+
+# stderr carries a "scan complete" diagnostic whose message reports whether the
+# walk finished or hit --max-duration (timed_out=true => partial coverage).
+SCAN_COMPLETED=true
+grep -q 'timed_out=true' "$DIAGS" 2>/dev/null && SCAN_COMPLETED=false
+
+FINDINGS_TOTAL="$(wc -l <"$FINDINGS" 2>/dev/null | tr -d '[:space:]')"
+[ -z "$FINDINGS_TOTAL" ] && FINDINGS_TOTAL=0
+BY_SEVERITY="$(jq -s 'group_by(.severity)
+  | map({key: (.[0].severity // "unknown"), value: length})
+  | from_entries' "$FINDINGS" 2>/dev/null)"
+[ -z "$BY_SEVERITY" ] && BY_SEVERITY='{}'
+
+CATALOG_FILES="$(ls "$CATALOG_DIR"/*.json 2>/dev/null | jq -R . | jq -s . 2>/dev/null)"
+[ -z "$CATALOG_FILES" ] && CATALOG_FILES='[]'
+
+if [ "$SCAN_EXIT" -ne 0 ]; then
+  STATUS="scan_error"
+elif [ "$FINDINGS_TOTAL" -gt 0 ]; then
+  STATUS="exposed"
+elif [ "$SCAN_COMPLETED" != true ]; then
+  STATUS="incomplete"   # likely hit --max-duration; coverage is partial
+else
+  STATUS="clean"
+fi
+
+jq -n \
+  --arg run_id        "$TS" \
+  --arg host          "$(hostname)" \
+  --arg scanner       "${SCANNER_VERSION:-unknown}" \
+  --arg repo_commit   "$REPO_COMMIT" \
+  --argjson repo_upd  "$REPO_UPDATED" \
+  --argjson bin_upd   "$BINARY_UPDATED" \
+  --argjson scan_exit "$SCAN_EXIT" \
+  --argjson completed "$SCAN_COMPLETED" \
+  --arg scan_root     "$SCAN_ROOT" \
+  --arg catalog_dir   "$CATALOG_DIR" \
+  --argjson catalogs  "$CATALOG_FILES" \
+  --argjson total     "$FINDINGS_TOTAL" \
+  --argjson by_sev    "$BY_SEVERITY" \
+  --arg status        "$STATUS" \
+  --arg findings_path "$FINDINGS" \
+  --arg summary_path  "$SUMMARY" \
+  --arg finished_at   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '{
+    run_id: $run_id,
+    finished_at: $finished_at,
+    host: $host,
+    status: $status,
+    scanner_version: $scanner,
+    repo_commit: $repo_commit,
+    repo_updated: $repo_upd,
+    binary_updated: $bin_upd,
+    scan_exit_code: $scan_exit,
+    scan_completed: $completed,
+    scan_root: $scan_root,
+    catalog_dir: $catalog_dir,
+    catalog_files: $catalogs,
+    findings_total: $total,
+    findings_by_severity: $by_sev,
+    findings_path: $findings_path,
+    summary_path: $summary_path
+  }' >"$MANIFEST"
+
+# Point latest/ at this run.
+ln -sfn "$RUN_DIR" "$HONEY/latest"
+
+log "done: status=$STATUS findings=$FINDINGS_TOTAL -> $RUN_DIR"
+echo "----------------------------------------------------------------"
+cat "$MANIFEST"
+
+# Exit non-zero when the run needs attention (failed or partial coverage),
+# so a runner/routine can alert on it. "exposed" stays exit 0 — findings are
+# a successful result; the routine triages them from the manifest.
+case "$STATUS" in
+  scan_error|incomplete) exit 1 ;;
+  *) exit 0 ;;
+esac

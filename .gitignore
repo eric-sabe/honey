@@ -1,0 +1,14 @@
+# Scan output — a machine inventory; never publish.
+runs/
+latest
+
+# Logs (contain hostnames and local paths).
+*.log
+cycle.log
+
+# Local secrets, if you ever add any (e.g. Slack webhook/token).
+secrets.env
+*.env
+
+# macOS cruft.
+.DS_Store
