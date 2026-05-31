@@ -5,10 +5,13 @@
 #   1. Verify the toolchain (bash, git, jq, Go 1.25+).
 #   2. Clone the bumblebee repo (for threat_intel catalogs) if absent.
 #   3. go install the bumblebee binary.
-#   4. Run doctor.sh to confirm everything is ready.
+#   4. Offer the optional Go-based vuln lenses (osv-scanner, govulncheck).
+#   5. Run doctor.sh to confirm everything is ready.
 #
 # Idempotent: safe to re-run. Installs nothing it can install for you that
-# needs a package manager (jq, Go) — it tells you the command instead.
+# needs a package manager (jq, Go) — it tells you the command instead. The
+# Python-based skillspector lens is pointed to, not auto-installed.
+# HONEY_SETUP_INSTALL_LENSES=0 skips the optional-lens step entirely.
 
 set -uo pipefail
 HONEY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -66,7 +69,37 @@ check_gobin_on_path >/dev/null || {
   printf 'then open a new shell (or `source` it) before scanning.\n'
 }
 
-# --- 4. Verify --------------------------------------------------------------
+# --- 4. Optional lenses -----------------------------------------------------
+# honey can run additional scanners as "lenses" (see README). They are OPT-IN
+# and never required. We offer to install the two lightweight Go-based ones
+# here (you already have Go); SkillSpector has a Python stack so we only point
+# to it rather than installing it. Set HONEY_SETUP_INSTALL_LENSES=0 to skip.
+if [ "${HONEY_SETUP_INSTALL_LENSES:-1}" = "1" ]; then
+  echo
+  echo "optional vuln-scanning lenses (Go-based — safe to install now):"
+  if command -v osv-scanner >/dev/null 2>&1; then
+    ok "osv-scanner already installed"
+  else
+    echo "  installing osv-scanner (multi-ecosystem lockfile vuln scan) ..."
+    if go install github.com/google/osv-scanner/cmd/osv-scanner@latest; then ok "osv-scanner installed"; else bad "osv-scanner install failed (optional — continuing)"; fi
+  fi
+  if command -v govulncheck >/dev/null 2>&1; then
+    ok "govulncheck already installed"
+  else
+    echo "  installing govulncheck (Go reachability-aware vuln scan) ..."
+    if go install golang.org/x/vuln/cmd/govulncheck@latest; then ok "govulncheck installed"; else bad "govulncheck install failed (optional — continuing)"; fi
+  fi
+  echo
+  echo "optional agent-skill lens (separate Python install — NOT installed automatically):"
+  if command -v skillspector >/dev/null 2>&1; then
+    ok "skillspector already installed"
+  else
+    hint "skillspector scans AI agent skills; install per https://github.com/NVIDIA/skillspector"
+    hint "then it activates automatically on the next run."
+  fi
+fi
+
+# --- 5. Verify --------------------------------------------------------------
 echo
 echo "running doctor to verify ..."
 echo

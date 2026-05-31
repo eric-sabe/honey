@@ -29,13 +29,18 @@ You can use honey two ways:
 
 ```sh
 git clone https://github.com/<you>/honey && cd honey
-./setup.sh        # clones bumblebee, installs the binary, verifies everything
+./setup.sh        # clones bumblebee, installs the binary + Go vuln lenses, verifies
 ./daily-cycle.sh  # run a scan; read runs/latest/manifest.json for the verdict
 ```
 
 `setup.sh` is idempotent and ends by running `./doctor.sh`, which prints a
 ✓/✗ line for every dependency with exact fix-it commands for anything
 missing. If a scan ever misbehaves, run `./doctor.sh` first.
+
+By default `setup.sh` also offers to install the two Go-based vulnerability
+[lenses](#lenses--additional-scanners-optional) (osv-scanner, govulncheck) —
+you already have Go. The Python-based skillspector lens is pointed to, not
+auto-installed. Pass `HONEY_SETUP_INSTALL_LENSES=0 ./setup.sh` to skip lenses.
 
 ### Requirements
 
@@ -134,6 +139,19 @@ judgment on top of `report.sh`'s deterministic facts. Because it's *Local*,
 it can see your real filesystem (so the scan is meaningful) — a *Remote* cloud
 routine cannot, and would always report clean.
 
+**Lenses in the routine — already handled.** The prompt runs `report.sh`,
+which covers bumblebee *and every active lens*, so the routine picks up
+osv-scanner / govulncheck / skillspector automatically once their tools are
+installed — no prompt change needed. Two things make this work without manual
+config:
+- `daily-cycle.sh` sets its own PATH (including `~/go/bin` and `~/.local/bin`),
+  so the lens tools resolve even though a Local routine starts with a bare
+  environment.
+- The vuln lenses default to scanning `~/git:~/code:~/Developer:~/src`. If your
+  projects live elsewhere, add a line to the routine prompt before STEP 1, e.g.
+  `Set HONEY_PROJECT_ROOTS=/my/projects:/other before running the scripts.`
+  (A Local routine does not inherit env vars from your shell.)
+
 To triage by hand in a chat instead ("triage the latest honey run"), see
 [`triage-guide.md`](triage-guide.md).
 
@@ -183,12 +201,16 @@ actionable, not just a "something matched" ping.
 ## Manual use
 
 ```sh
-./doctor.sh                      # health check — run this if anything's off
-./run-scan.sh                    # just the scan (no cycle wrapper)
-./daily-cycle.sh                 # scan + verdict
+./doctor.sh                      # health check + which lenses are active
+./run-scan.sh                    # just bumblebee (no cycle wrapper, no lenses)
+./daily-cycle.sh                 # bumblebee + all active lenses + overall verdict
+./report.sh                      # render the latest run (bumblebee + every lens)
 
 # Narrow the scan or change the time budget:
 BUMBLEBEE_SCAN_ROOT="$HOME/code" BUMBLEBEE_MAX_DURATION=20m ./run-scan.sh
+
+# Point the vuln lenses at your projects:
+HONEY_PROJECT_ROOTS="$HOME/work:$HOME/repos" ./daily-cycle.sh
 ```
 
 After any run, `runs/latest/manifest.json` has the verdict and
@@ -212,7 +234,7 @@ After any run, `runs/latest/manifest.json` has the verdict and
 
 ```
 honey/
-├── setup.sh          # one-command setup: clone bumblebee, install binary, verify
+├── setup.sh          # one-command setup: bumblebee + Go vuln lenses, then verify
 ├── doctor.sh         # dependency health check with fix-it hints
 ├── lib/preflight.sh  # shared dependency checks (sourced by the above)
 ├── run-scan.sh       # update repo+binary, deep-scan, write a run + manifest

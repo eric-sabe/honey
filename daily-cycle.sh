@@ -20,6 +20,13 @@ set -uo pipefail
 HONEY="${HONEY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 CYCLE_LOG="$HONEY/cycle.log"
 
+# A scheduler / Local routine may hand us a bare PATH. Ensure the dirs that
+# hold the scanners are findable BEFORE we invoke run-scan and the lenses —
+# otherwise an installed lens (osv-scanner/govulncheck in ~/go/bin,
+# skillspector in ~/.local/bin) would silently self-skip as "not installed",
+# a false "lens inactive". Mirrors run-scan.sh's PATH plus ~/.local/bin.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
 clog() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$CYCLE_LOG"; }
 
 clog "=== cycle start ==="
