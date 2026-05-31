@@ -2,28 +2,36 @@
 
 [![ci](https://github.com/eric-sabe/honey/actions/workflows/ci.yml/badge.svg)](https://github.com/eric-sabe/honey/actions/workflows/ci.yml)
 
-honey turns [bumblebee](https://github.com/perplexityai/bumblebee) into a
-hands-off supply-chain watchdog for your dev machine. bumblebee is a
-read-only inventory collector: it flags on-disk package/extension/version
-metadata that exactly matches a known-compromised entry in a
-threat-intelligence catalog. honey wraps it in an
-**update → scan → report** loop, and (optionally) has Claude DM you a triage
-write-up in Slack each day.
+A hands-off supply-chain watchdog for your dev machine. honey runs
+best-in-class security scanners on a schedule, unifies their results into one
+verdict, and (optionally) has Claude DM you a triage write-up each day.
 
-> **Credit:** the heavy lifting is [Perplexity](https://www.perplexity.ai)'s.
-> [**bumblebee**](https://github.com/perplexityai/bumblebee) (the scanner) and
-> its [**threat_intel**](https://github.com/perplexityai/bumblebee/tree/main/threat_intel)
-> exposure catalogs are published and maintained by Perplexity under
-> Apache 2.0. honey is just a thin scheduling/reporting wrapper around them —
-> all detection capability and threat data come from bumblebee. See
-> [Acknowledgements](#acknowledgements).
+honey doesn't detect anything itself — it **orchestrates** scanners, each a
+"lens" on a different risk:
 
-You can use honey two ways:
+| Lens | Answers | Upstream |
+|---|---|---|
+| **bumblebee** *(core)* | "Do I have a known-compromised package/extension?" | [Perplexity](https://github.com/perplexityai/bumblebee) |
+| osv-scanner | "Do my dependencies have known CVEs?" (all ecosystems) | [Google/OSV](https://github.com/google/osv-scanner) |
+| govulncheck | "Do I actually *call* a vulnerable Go function?" | [Go team](https://golang.org/x/vuln) |
+| skillspector | "Is an installed AI agent skill behaving maliciously?" | [NVIDIA](https://github.com/NVIDIA/skillspector) |
 
-- **As a plain scanner** — run one command, read the verdict. No Claude, no
-  Slack, no scheduler required.
-- **As a daily routine** — a Claude Code *Local* routine runs the scan on a
-  schedule and DMs the analysis to Slack. (Optional, see below.)
+bumblebee (the only required scanner) is a read-only inventory collector that
+flags on-disk package/extension/version metadata matching a known-compromised
+entry in a threat-intelligence catalog. The lenses are **opt-in** and inert
+until you install their tool. honey adds the update→scan→report loop,
+worst-wins verdict, scheduling, and reporting — **all detection capability and
+threat data are the upstreams'**, above all [Perplexity](https://www.perplexity.ai)'s
+bumblebee. See [Acknowledgements](#acknowledgements).
+
+Use honey three ways, smallest footprint first:
+
+- **Plain scanner** — `./daily-cycle.sh`, read the verdict. No Claude, no
+  scheduler, no accounts.
+- **Scheduled + desktop notification** — a launchd/cron job alerts you on
+  findings, with a deterministic report. No Claude required.
+- **Daily Claude routine** — a Claude Code *Local* routine scans on a schedule
+  and DMs an enriched triage write-up to Slack.
 
 ## Quickstart
 
