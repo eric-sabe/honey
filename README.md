@@ -52,10 +52,17 @@ auto-installed. Pass `HONEY_SETUP_INSTALL_LENSES=0 ./setup.sh` to skip lenses.
 
 ### Requirements
 
-`bash`, `git`, [`jq`](https://jqlang.org), and [Go](https://go.dev) **1.25+**
-(bumblebee needs 1.25+). macOS or Linux. `setup.sh` checks all of these and
-tells you the install command for anything you're missing — it won't guess
-your package manager.
+**Core:** `bash`, `git`, [`jq`](https://jqlang.org), and [Go](https://go.dev)
+**1.25+** (bumblebee needs 1.25+). macOS or Linux. `setup.sh` checks all of
+these and tells you the install command for anything you're missing — it won't
+guess your package manager. These also cover the two Go-based vuln lenses
+(osv-scanner, govulncheck), which install via `go install`.
+
+**Per optional lens:** only the `skillspector` lens adds a requirement —
+**Python 3.12+** (install it per
+[SkillSpector's README](https://github.com/NVIDIA/skillspector)). The vuln
+lenses need nothing beyond the core toolchain. `./doctor.sh` shows which
+lenses are active and how to enable inactive ones.
 
 > **Why a bumblebee *checkout* and not just the binary?** The threat-intel
 > catalogs live in the repo's `threat_intel/` directory, not inside the
