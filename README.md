@@ -1,5 +1,7 @@
 # honey
 
+[![ci](https://github.com/eric-sabe/honey/actions/workflows/ci.yml/badge.svg)](https://github.com/eric-sabe/honey/actions/workflows/ci.yml)
+
 honey turns [bumblebee](https://github.com/perplexityai/bumblebee) into a
 hands-off supply-chain watchdog for your dev machine. bumblebee is a
 read-only inventory collector: it flags on-disk package/extension/version

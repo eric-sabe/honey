@@ -70,16 +70,19 @@ check_bumblebee_binary() {
 
 check_bumblebee_selftest() {
   command -v bumblebee >/dev/null 2>&1 || { bad "bumblebee selftest skipped (no binary)"; return 1; }
-  local out; out="$(bumblebee selftest 2>&1)"
-  if [ $? -eq 0 ]; then ok "bumblebee selftest: ${out}"; return 0
-  else bad "bumblebee selftest FAILED"; hint "$out"; hint "reinstall: go install $GO_PKG"; return 1; fi
+  local out
+  if out="$(bumblebee selftest 2>&1)"; then
+    ok "bumblebee selftest: ${out}"; return 0
+  else
+    bad "bumblebee selftest FAILED"; hint "$out"; hint "reinstall: go install $GO_PKG"; return 1
+  fi
 }
 
 check_catalog_checkout() {  # the threat_intel/ catalogs live in a git checkout, NOT the binary
   local cat="$BUMBLEBEE_REPO/threat_intel"
-  if [ -d "$cat" ] && ls "$cat"/*.json >/dev/null 2>&1; then
-    local n; n="$(ls "$cat"/*.json 2>/dev/null | wc -l | tr -d ' ')"
-    ok "threat_intel catalogs: $n found in $BUMBLEBEE_REPO"; return 0
+  local jsons=("$cat"/*.json)   # glob; if none match, [0] is the literal pattern
+  if [ -d "$cat" ] && [ -e "${jsons[0]}" ]; then
+    ok "threat_intel catalogs: ${#jsons[@]} found in $BUMBLEBEE_REPO"; return 0
   else
     bad "no threat_intel catalogs at $BUMBLEBEE_REPO/threat_intel"
     hint "clone the bumblebee repo (needed for catalogs — the binary alone has none):"

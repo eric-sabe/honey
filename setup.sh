@@ -30,11 +30,12 @@ fi
 
 # --- 2. bumblebee checkout (for threat_intel catalogs) ----------------------
 CAT="$BUMBLEBEE_REPO/threat_intel"
-if [ -d "$CAT" ] && ls "$CAT"/*.json >/dev/null 2>&1; then
+CAT_JSONS=("$CAT"/*.json)
+if [ -d "$CAT" ] && [ -e "${CAT_JSONS[0]}" ]; then
   ok "bumblebee checkout present ($BUMBLEBEE_REPO)"
 elif [ -d "$BUMBLEBEE_REPO/.git" ]; then
   echo "  updating bumblebee checkout ($BUMBLEBEE_REPO) ..."
-  git -C "$BUMBLEBEE_REPO" pull --ff-only --quiet && ok "checkout updated" || bad "pull failed (continuing)"
+  if git -C "$BUMBLEBEE_REPO" pull --ff-only --quiet; then ok "checkout updated"; else bad "pull failed (continuing)"; fi
 else
   echo "  cloning bumblebee into $BUMBLEBEE_REPO ..."
   if git clone --quiet https://github.com/perplexityai/bumblebee "$BUMBLEBEE_REPO"; then
@@ -59,7 +60,9 @@ check_gobin_on_path >/dev/null || {
   gobin="$(go env GOBIN 2>/dev/null)"; [ -z "$gobin" ] && gobin="$(go env GOPATH)/bin"
   echo
   printf '%sNote:%s %s is not on your PATH. Add this to your shell profile:\n' "$C_BAD" "$C_OFF" "$gobin"
+  # shellcheck disable=SC2016  # $PATH and `source` are literal text shown to the user, not for expansion
   printf '    export PATH="%s:$PATH"\n' "$gobin"
+  # shellcheck disable=SC2016
   printf 'then open a new shell (or `source` it) before scanning.\n'
 }
 

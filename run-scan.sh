@@ -156,7 +156,11 @@ BY_SEVERITY="$(jq -s 'group_by(.severity)
   | from_entries' "$FINDINGS" 2>/dev/null)"
 [ -z "$BY_SEVERITY" ] && BY_SEVERITY='{}'
 
-CATALOG_FILES="$(ls "$CATALOG_DIR"/*.json 2>/dev/null | jq -R . | jq -s . 2>/dev/null)"
+# List catalog files via a glob (handles odd names; no `ls` parsing), and turn
+# the array into a JSON array with jq's --args.
+CAT_GLOB=("$CATALOG_DIR"/*.json)
+[ -e "${CAT_GLOB[0]}" ] || CAT_GLOB=()
+CATALOG_FILES="$(jq -n '$ARGS.positional' --args "${CAT_GLOB[@]}" 2>/dev/null)"
 [ -z "$CATALOG_FILES" ] && CATALOG_FILES='[]'
 
 if [ "$SCAN_EXIT" -ne 0 ]; then
