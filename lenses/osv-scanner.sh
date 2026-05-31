@@ -83,25 +83,52 @@ fi
 # stdlib vulns you actually call — so deferring stdlib to it avoids a flood of
 # low-signal "unknown" findings. (Set HONEY_OSV_INCLUDE_GO_STDLIB=1 to keep them.)
 KEEP_STDLIB="${HONEY_OSV_INCLUDE_GO_STDLIB:-0}"
-FINDINGS="$(jq --arg keep_stdlib "$KEEP_STDLIB" '[
-  (.results // [])[] | (.source.path // "") as $src | (.packages // [])[]
-  | (.package.name // "?") as $name | (.package.version // "?") as $ver
-  | (.package.ecosystem // "?") as $eco
-  | select($keep_stdlib == "1" or .package.name != "stdlib")
-  | (.groups // [])[]
-  | (.max_severity // "" | if . == "" then null else (try tonumber catch null) end) as $cvss
-  | {
-      severity: ( if   $cvss == null then "unknown"
-                  elif $cvss >= 9 then "critical"
-                  elif $cvss >= 7 then "high"
-                  elif $cvss >= 4 then "medium"
-                  else "low" end ),
-      title: ($name + "@" + $ver + " (" + $eco + "): " + ((.ids // []) | join(", "))),
-      location: $src,
-      detail: ("CVSS " + ($cvss|tostring) + "; advisories: " + ((.ids // []) | join(", "))),
-      ref: ((.ids // [])[0] // "")
-    }
-]' "$raw" 2>"$work/normalize.err")"
+
+# Exclude findings in vendored / installed-dependency / per-worktree trees.
+# osv-scanner walks into node_modules, vendor/, testdata, and every nested
+# .claude/worktrees/* (each carrying a full node_modules) — producing thousands
+# of duplicate findings for transitive deps you don't directly control (e.g. the
+# same speedline-core counted 60x across worktrees). We scan DECLARED manifests,
+# not installed copies. HONEY_OSV_EXCLUDE_PATHS overrides the regex (ERE,
+# matched against each finding's source path); set it empty to keep everything.
+EXCLUDE_RE="${HONEY_OSV_EXCLUDE_PATHS:-/(node_modules|vendor|bower_components|\\.pnpm|testdata|test/fixtures|fixtures|\\.claude/worktrees)/}"
+
+# We DEDUPE identical (package@version + advisory) findings across paths, since
+# the same vulnerable dep appears in many lockfiles. We keep the worst-severity
+# instance and record how many paths it spanned. HONEY_OSV_NO_DEDUPE=1 disables.
+DEDUPE="${HONEY_OSV_NO_DEDUPE:-0}"
+
+FINDINGS="$(jq --arg keep_stdlib "$KEEP_STDLIB" --arg excl "$EXCLUDE_RE" --arg dedupe "$DEDUPE" '
+  [ (.results // [])[] | (.source.path // "") as $src
+    | (if $excl == "" then true else ($src | test($excl) | not) end) as $keep
+    | select($keep)
+    | (.packages // [])[]
+    | (.package.name // "?") as $name | (.package.version // "?") as $ver
+    | (.package.ecosystem // "?") as $eco
+    | select($keep_stdlib == "1" or .package.name != "stdlib")
+    | (.groups // [])[]
+    | (.max_severity // "" | if . == "" then null else (try tonumber catch null) end) as $cvss
+    | {
+        severity: ( if   $cvss == null then "unknown"
+                    elif $cvss >= 9 then "critical"
+                    elif $cvss >= 7 then "high"
+                    elif $cvss >= 4 then "medium"
+                    else "low" end ),
+        title: ($name + "@" + $ver + " (" + $eco + "): " + ((.ids // []) | join(", "))),
+        location: $src,
+        detail: ("CVSS " + ($cvss|tostring) + "; advisories: " + ((.ids // []) | join(", "))),
+        ref: ((.ids // [])[0] // ""),
+        _key: ($name + "@" + $ver + "|" + ((.ids // []) | join(","))),
+        _cvss: ($cvss // -1)
+      } ]
+  | if $dedupe == "1" then .
+    else ( group_by(._key)
+           | map( (max_by(._cvss)) as $w
+                  | $w + { location: ($w.location
+                      + (if (length > 1) then "  (+" + ((length - 1)|tostring) + " more path(s))" else "" end)) } ) )
+    end
+  | map(del(._key, ._cvss))
+' "$raw" 2>"$work/normalize.err")"
 # Distinguish a jq normalization FAILURE from a genuinely empty result: a
 # failure (schema drift, etc.) must surface as scan_error, never silently
 # downgrade a populated scan to "clean". (try/catch above already prevents one
@@ -117,6 +144,8 @@ BY_SEV="$(printf '%s' "$FINDINGS" | jq 'group_by(.severity)|map({key:.[0].severi
 NOTE="scanned ${#roots[@]} project root(s): ${roots[*]}"
 [ -n "$OFFLINE" ] && NOTE="$NOTE; offline DB"
 [ "$KEEP_STDLIB" != "1" ] && NOTE="$NOTE; Go stdlib advisories deferred to govulncheck"
+[ -n "$EXCLUDE_RE" ] && NOTE="$NOTE; vendored/worktree paths excluded"
+[ "$DEDUPE" != "1" ] && NOTE="$NOTE; deduped across paths"
 
 if [ "$TOTAL" -gt 0 ]; then emit "exposed" "$TOTAL" "$BY_SEV" "$FINDINGS" "$NOTE"
 else emit "clean" 0 '{}' '[]' "$NOTE"; fi

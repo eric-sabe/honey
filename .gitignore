@@ -15,3 +15,6 @@ secrets.env
 
 # macOS cruft.
 .DS_Store
+
+# Local Claude Code runtime artifacts (scheduler locks, etc.).
+.claude/

@@ -37,14 +37,25 @@ STEP 2 — GET THE FACTS. Run the deterministic report generator:
 
     HONEY_DIR/report.sh
 
-It prints the OVERALL verdict plus a section per scanner: bumblebee (package /
-catalog matches) and each active lens (osv-scanner, govulncheck, skillspector).
-Treat its output as the factual baseline; do not contradict it or invent
-findings beyond it. For extra detail read HONEY_DIR/latest/manifest.json and
-findings.ndjson (bumblebee), and HONEY_DIR/latest/lens-*.json (each lens's
-normalized findings: severity, title, location, detail, ref). The overall
-verdict is the worst across all scanners — surface every scanner's findings,
-not just bumblebee's.
+THE VERDICT IS THE `OVERALL:` LINE THAT report.sh PRINTS — nothing else. It is
+the worst status across bumblebee AND every active lens (osv-scanner,
+govulncheck, skillspector). report.sh also exits 0 only when OVERALL is clean,
+1 otherwise.
+
+CRITICAL — do not produce a false all-clear:
+  • Use ONLY the OVERALL line for the verdict. Do NOT read the verdict from
+    manifest.json — that is bumblebee ALONE and is `clean` even when a lens
+    found exposures. (This is the #1 mistake; the manifest is one scanner, not
+    the verdict.)
+  • You may report "all clear" ONLY if report.sh prints `OVERALL: CLEAN`. If it
+    prints `OVERALL: EXPOSED` (or INCOMPLETE / SCAN_ERROR), the run is NOT
+    clear — even if bumblebee itself was clean.
+
+Treat report.sh's output as the factual baseline; do not contradict it or
+invent findings beyond it. For extra detail read HONEY_DIR/latest/lens-*.json
+(each lens's normalized findings: severity, title, location, detail, ref) and,
+for bumblebee specifically, manifest.json + findings.ndjson. Surface EVERY
+scanner's findings, not just bumblebee's.
 
 STEP 3 — ENRICH. Add judgment a static report can't, per scanner:
   • bumblebee: note whether source_type / root_kind suggests a direct vs.
@@ -68,11 +79,15 @@ STEP 3 — ENRICH. Add judgment a static report can't, per scanner:
 Keep remediation labeled "run manually" — never run state-changing commands.
 
 STEP 4 — DELIVER. Send the result as a Slack DM to me, in Slack mrkdwn
-(*bold*, `code`, • bullets). Lead with one status line. On a clean run, one
-line is enough. On an exposed run, list findings worst-severity first and end
-with a "do first" ordering by severity then confidence. Cite the run dir path
-once. Do not modify files or run anything that changes state beyond
-daily-cycle.sh and report.sh above.
+(*bold*, `code`, • bullets). Lead with the OVERALL status from STEP 2.
+  • OVERALL: CLEAN → a one-line all-clear is enough (and only then).
+  • OVERALL: EXPOSED → lead with which scanners fired and their counts, then
+    list findings worst-severity first, and end with a "do first" ordering by
+    severity then confidence. Never call an EXPOSED run "all clear".
+  • OVERALL: INCOMPLETE / SCAN_ERROR → say so plainly and name the affected
+    scanner(s); partial coverage is not a clean result.
+Cite the run dir path once. Do not modify files or run anything that changes
+state beyond daily-cycle.sh and report.sh above.
 ```
 
 The deterministic baseline lives in [`report.sh`](report.sh) and the analysis

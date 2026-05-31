@@ -124,6 +124,15 @@ directories, not all of `$HOME`. Set `HONEY_PROJECT_ROOTS` (colon-separated;
 default `~/git:~/code:~/Developer:~/src`) to control this. The skillspector
 lens scans skill dirs under `~/.claude` (override with `HONEY_SKILL_ROOTS`).
 
+**Declared deps, not vendored copies.** osv-scanner walks into `node_modules`,
+`vendor/`, `.pnpm`, and every nested `.claude/worktrees/*` — flagging the same
+transitive dependency dozens of times across installed copies (one real run
+produced 2,954 findings, 81% of them duplicated vendored packages; after
+filtering, 402 real ones). By default honey **excludes those paths and dedupes
+identical `package@version`+advisory across lockfiles**, so you see each real
+vulnerable dependency once. Tune via `HONEY_OSV_EXCLUDE_PATHS` (set empty to
+scan everything) and `HONEY_OSV_NO_DEDUPE=1`.
+
 **Go division of labor.** osv-scanner and govulncheck overlap on Go. By
 default osv-scanner **defers Go stdlib advisories to govulncheck** — otherwise
 it flags every stdlib CVE for your `go` directive (often dozens, unreachable,
@@ -281,6 +290,8 @@ one-off run. You can also hand-edit `honey.conf` — one `export VAR=…` per li
 | `HONEY_UPDATE_LENSES` | `1` | `go install @latest` the Go lens binaries (osv-scanner, govulncheck) before scanning; `0` to skip |
 | `HONEY_OSV_OFFLINE` | `0` | osv-scanner: use local vuln DBs instead of OSV.dev |
 | `HONEY_OSV_INCLUDE_GO_STDLIB` | `0` | osv-scanner: keep Go stdlib advisories (default defers them to govulncheck) |
+| `HONEY_OSV_EXCLUDE_PATHS` | `node_modules`/`vendor`/`.pnpm`/`testdata`/`fixtures`/`.claude/worktrees` (ERE) | osv-scanner: skip findings whose source path matches — keeps the scan on *declared* manifests, not installed/vendored copies. Set empty to scan everything. |
+| `HONEY_OSV_NO_DEDUPE` | `0` | osv-scanner: `1` keeps one finding per path; default collapses identical `package@version`+advisory across paths into one (`+N more`) |
 | `HONEY_SKILLSPECTOR_LLM` | `0` | skillspector: enable its own LLM stage (default static `--no-llm`) |
 
 ## Layout
