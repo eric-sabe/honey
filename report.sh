@@ -26,6 +26,7 @@ STATUS="$(j '.status')"; TOTAL="$(j '.findings_total')"; HOST="$(j '.host')"
 ROOT="$(j '.scan_root')"; VER="$(j '.scanner_version')"; WHEN="$(j '.finished_at')"
 COMPLETED="$(j '.scan_completed')"; CATDIR="$(j '.catalog_dir')"
 FILES="$(jq -r '.files_considered // "?"' "$RUN_DIR/summary.json" 2>/dev/null)"
+[ -z "$FILES" ] && FILES="?"   # summary.json may be empty/absent on scan_error
 
 # Remediation guidance per ecosystem. Generic but correct starting points;
 # always "run manually" — honey never changes state.

@@ -8,6 +8,14 @@ threat-intelligence catalog. honey wraps it in an
 **update → scan → report** loop, and (optionally) has Claude DM you a triage
 write-up in Slack each day.
 
+> **Credit:** the heavy lifting is [Perplexity](https://www.perplexity.ai)'s.
+> [**bumblebee**](https://github.com/perplexityai/bumblebee) (the scanner) and
+> its [**threat_intel**](https://github.com/perplexityai/bumblebee/tree/main/threat_intel)
+> exposure catalogs are published and maintained by Perplexity under
+> Apache 2.0. honey is just a thin scheduling/reporting wrapper around them —
+> all detection capability and threat data come from bumblebee. See
+> [Acknowledgements](#acknowledgements).
+
 You can use honey two ways:
 
 - **As a plain scanner** — run one command, read the verdict. No Claude, no
@@ -182,6 +190,28 @@ of your machine and should never be published.
 | `go` build fails | Need Go 1.25+; upgrade from <https://go.dev/dl/> |
 | Status `incomplete` | Scan hit the time cap; raise `BUMBLEBEE_MAX_DURATION` or narrow `BUMBLEBEE_SCAN_ROOT` |
 
+## Acknowledgements
+
+honey is a thin wrapper. The actual scanning engine and all threat
+intelligence are the work of **[Perplexity](https://www.perplexity.ai)**:
+
+- **[bumblebee](https://github.com/perplexityai/bumblebee)** — the read-only
+  inventory collector and exposure scanner honey drives. Every detection,
+  every ecosystem parser, the scan profiles, and the record schema are
+  bumblebee's.
+- **[threat_intel catalogs](https://github.com/perplexityai/bumblebee/tree/main/threat_intel)**
+  — the maintained exposure catalogs of recent supply-chain campaigns that
+  honey matches against, assembled by Perplexity from public
+  threat-intelligence reporting and updated via PRs.
+
+Both are published by Perplexity under the Apache License 2.0. honey adds only
+the update→scan→report loop, scheduling, and reporting around them. If honey
+is useful to you, the credit for the hard part belongs upstream — please star
+and follow [bumblebee](https://github.com/perplexityai/bumblebee).
+
 ## License
 
-[Apache 2.0](LICENSE).
+honey is licensed under [Apache 2.0](LICENSE). It depends on, but does not
+include, [bumblebee](https://github.com/perplexityai/bumblebee) and its
+threat_intel catalogs, which are independently licensed by Perplexity under
+Apache 2.0. See [NOTICE](NOTICE) for attribution.

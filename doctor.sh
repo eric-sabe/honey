@@ -22,6 +22,7 @@ fails=$?
 echo
 if [ "$fails" -eq 0 ]; then
   printf '%sAll checks passed — honey is ready.%s Run:  ./daily-cycle.sh\n' "$C_OK" "$C_OFF"
+  printf '%sScanner + threat intel by Perplexity: https://github.com/perplexityai/bumblebee%s\n' "$C_DIM" "$C_OFF"
   exit 0
 else
   printf '%s%d check(s) failed.%s Fix the items above, then re-run ./doctor.sh\n' "$C_BAD" "$fails" "$C_OFF"

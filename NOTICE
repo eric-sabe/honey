@@ -1,0 +1,27 @@
+honey
+Copyright 2026 honey contributors
+
+This product is licensed under the Apache License, Version 2.0.
+
+------------------------------------------------------------------------------
+Attribution
+------------------------------------------------------------------------------
+
+honey is a scheduling and reporting wrapper. It depends on, but does not
+redistribute, the following work by Perplexity:
+
+  bumblebee
+  Copyright Perplexity AI, Inc.
+  Licensed under the Apache License, Version 2.0.
+  https://github.com/perplexityai/bumblebee
+
+    - The bumblebee scanner binary provides all package/extension/version
+      detection and the exposure-matching engine that honey invokes.
+    - The threat_intel exposure catalogs distributed with bumblebee provide
+      all supply-chain campaign data that honey matches against.
+
+honey installs bumblebee via `go install` and reads the threat_intel catalogs
+from a local checkout of the bumblebee repository at runtime; neither is
+included in this repository. All detection capability and threat intelligence
+are the work of Perplexity. See https://github.com/perplexityai/bumblebee for
+the upstream project, license, and catalog provenance.
