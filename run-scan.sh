@@ -45,10 +45,10 @@ if ! command -v jq >/dev/null 2>&1; then
   echo "  then re-run. (./doctor.sh checks all dependencies.)" >&2
   exit 1
 fi
-if [ ! -d "$BUMBLEBEE_REPO/threat_intel" ] || ! ls "$BUMBLEBEE_REPO"/threat_intel/*.json >/dev/null 2>&1; then
-  echo "honey: no threat_intel catalogs at $BUMBLEBEE_REPO/threat_intel" >&2
+if [ ! -d "$REPO/threat_intel" ] || ! ls "$REPO"/threat_intel/*.json >/dev/null 2>&1; then
+  echo "honey: no threat_intel catalogs at $REPO/threat_intel" >&2
   echo "  the bumblebee binary has no catalogs — you need a git checkout:" >&2
-  echo "    git clone https://github.com/perplexityai/bumblebee \"$BUMBLEBEE_REPO\"" >&2
+  echo "    git clone https://github.com/perplexityai/bumblebee \"$REPO\"" >&2
   echo "  or set BUMBLEBEE_REPO to an existing clone. (Run ./setup.sh to do this for you.)" >&2
   exit 1
 fi
@@ -135,8 +135,15 @@ log "scan exit code: $SCAN_EXIT"
 # ----------------------------------------------------------------------------
 # stdout carries finding + scan_summary records; with --findings-only a clean
 # scan emits only the scan_summary, which is the correct "all clear" signal.
-jq -c 'select(.record_type=="finding")'      "$RECORDS" >"$FINDINGS" 2>/dev/null || : >"$FINDINGS"
-jq -c 'select(.record_type=="scan_summary")' "$RECORDS" >"$SUMMARY"  2>/dev/null || : >"$SUMMARY"
+# Parse tolerantly with `fromjson?`: a single malformed/truncated line (e.g. an
+# interrupted write on --max-duration kill) must NOT discard the valid findings
+# that preceded it. The old `jq … || : >FILE` truncated everything on any bad
+# line — turning real findings into a false "clean". `fromjson?` skips only the
+# unparseable lines and keeps the rest.
+jq -Rc 'fromjson? | select(.record_type=="finding")'      "$RECORDS" >"$FINDINGS" 2>/dev/null
+jq -Rc 'fromjson? | select(.record_type=="scan_summary")' "$RECORDS" >"$SUMMARY"  2>/dev/null
+[ -f "$FINDINGS" ] || : >"$FINDINGS"
+[ -f "$SUMMARY" ]  || : >"$SUMMARY"
 
 # Did the walk finish, or hit --max-duration (=> partial coverage)? Prefer the
 # structured scan_summary.timed_out boolean; only fall back to grepping the

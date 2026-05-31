@@ -67,12 +67,22 @@ OVERALL="$STATUS"
 if [ -d "$HONEY/lenses" ]; then
   for lens in "$HONEY/lenses"/*.sh; do
     [ -f "$lens" ] || continue   # no lenses installed → loop body never runs
+    lname="$(basename "$lens" .sh)"
     "$lens" "$RUN_DIR" >>"$CYCLE_LOG" 2>&1
-    LJSON="$RUN_DIR/lens-$(basename "$lens" .sh).json"
-    [ -f "$LJSON" ] || continue
+    LRC=$?
+    LJSON="$RUN_DIR/lens-$lname.json"
+    # A lens that RAN but produced no parseable verdict is NOT an absent lens —
+    # treat it as scan_error so worst-wins escalates, rather than silently
+    # ignoring a possible masked finding. (Lenses self-skip with exit 0 + a
+    # "skipped" JSON, so this only triggers on a genuine crash.)
+    if [ ! -f "$LJSON" ] || ! jq -e '.status' "$LJSON" >/dev/null 2>&1; then
+      clog "lens $lname: CRASHED (rc=$LRC, no valid verdict) — escalating to scan_error"
+      [ "$(overall_rank scan_error)" -gt "$(overall_rank "$OVERALL")" ] && OVERALL="scan_error"
+      continue
+    fi
     LSTATUS="$(jq -r '.status' "$LJSON" 2>/dev/null)"
     LTOTAL="$(jq -r '.findings_total' "$LJSON" 2>/dev/null)"
-    clog "lens $(basename "$lens" .sh): status=$LSTATUS findings=$LTOTAL"
+    clog "lens $lname: status=$LSTATUS findings=$LTOTAL"
     [ "$LSTATUS" = "skipped" ] && continue
     [ "$(overall_rank "$LSTATUS")" -gt "$(overall_rank "$OVERALL")" ] && OVERALL="$LSTATUS"
   done

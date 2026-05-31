@@ -54,8 +54,30 @@ if { [ "$RC" -ne 0 ] && [ "$RC" -ne 1 ]; } || [ ! -f "$MANIFEST" ]; then
   exit 1
 fi
 
-STATUS="$(jq -r '.status' "$MANIFEST" 2>/dev/null)"
+# The bumblebee manifest carries ONLY bumblebee's verdict. The cycle's real
+# verdict is the worst across bumblebee + every active lens — so we must NOT
+# notify off the manifest alone, or a lens-only exposure (clean bumblebee + an
+# exposed osv-scanner/govulncheck/skillspector lens) would silently produce no
+# alert. Recompute worst-wins here across manifest.json + all lens-*.json,
+# mirroring daily-cycle's logic.
+rank() { case "$1" in scan_error) echo 4;; exposed) echo 3;; incomplete) echo 2;; clean|skipped) echo 1;; *) echo 0;; esac; }
+
+BB_STATUS="$(jq -r '.status' "$MANIFEST" 2>/dev/null)"
 TOTAL="$(jq -r '.findings_total' "$MANIFEST" 2>/dev/null)"
+STATUS="$BB_STATUS"          # overall verdict, escalated by lenses below
+LENS_HITS=""                 # human list of scanners that flagged something
+[ "$BB_STATUS" = "exposed" ] && LENS_HITS="bumblebee($TOTAL)"
+for lj in "$HONEY"/latest/lens-*.json; do
+  [ -f "$lj" ] || continue
+  ls_status="$(jq -r '.status' "$lj" 2>/dev/null)"
+  ls_name="$(jq -r '.lens' "$lj" 2>/dev/null)"
+  ls_total="$(jq -r '.findings_total' "$lj" 2>/dev/null)"
+  [ "$ls_status" = "skipped" ] && continue
+  [ "$(rank "$ls_status")" -gt "$(rank "$STATUS")" ] && STATUS="$ls_status"
+  if [ "$ls_status" = "exposed" ]; then
+    LENS_HITS="${LENS_HITS:+$LENS_HITS, }$ls_name($ls_total)"
+  fi
+done
 
 # Deterministic analysis (no AI) → saved beside the run and appended to the
 # cycle log, so a scheduled run leaves a full report behind, not just a ping.
@@ -70,8 +92,8 @@ case "$STATUS" in
     clog "clean — no notification"
     ;;
   exposed)
-    notify "🚨 Bumblebee: $TOTAL exposure match(es)" "Report: runs/latest/report.txt"
-    clog "notified: exposed ($TOTAL) — report at $REPORT"
+    notify "🚨 Bumblebee: exposure(s) found" "${LENS_HITS:-matches} — see runs/latest/report.txt"
+    clog "notified: exposed [$LENS_HITS] — report at $REPORT"
     ;;
   incomplete)
     notify "⚠️ Bumblebee scan INCOMPLETE" "Partial coverage — raise BUMBLEBEE_MAX_DURATION"

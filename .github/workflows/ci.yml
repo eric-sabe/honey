@@ -21,10 +21,10 @@ jobs:
       - name: bash syntax check (parse every script)
         run: |
           set -e
-          for f in *.sh lib/*.sh; do
+          for f in *.sh lib/*.sh lenses/*.sh; do
             echo "bash -n $f"
             bash -n "$f"
           done
 
       - name: shellcheck
-        run: shellcheck *.sh lib/*.sh
+        run: shellcheck *.sh lib/*.sh lenses/*.sh

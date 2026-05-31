@@ -54,6 +54,12 @@ raw="$work/osv.json"; : >"$raw"
 # shellcheck disable=SC2086  # $OFFLINE is an intentional multi-flag word split
 osv-scanner scan --format json $OFFLINE -r "${roots[@]}" >"$raw" 2>"$work/errors.log"
 if ! jq -e . "$raw" >/dev/null 2>&1; then
+  # "No package sources found" = the roots simply contain no lockfiles/manifests
+  # to scan. That is CLEAN (nothing to be vulnerable), NOT a scan error.
+  if grep -qi "no package sources found" "$work/errors.log" 2>/dev/null; then
+    emit "clean" 0 '{}' '[]' "no lockfiles/manifests found under: ${roots[*]}"
+    echo "lens osv-scanner: clean (no package sources)"; exit 0
+  fi
   emit "scan_error" 0 '{}' '[]' "osv-scanner produced no valid JSON — see $work/errors.log"
   echo "lens osv-scanner: scan_error (no JSON)"; exit 0
 fi
@@ -73,7 +79,7 @@ FINDINGS="$(jq --arg keep_stdlib "$KEEP_STDLIB" '[
   | (.package.ecosystem // "?") as $eco
   | select($keep_stdlib == "1" or .package.name != "stdlib")
   | (.groups // [])[]
-  | (.max_severity // "" | if . == "" then null else tonumber end) as $cvss
+  | (.max_severity // "" | if . == "" then null else (try tonumber catch null) end) as $cvss
   | {
       severity: ( if   $cvss == null then "unknown"
                   elif $cvss >= 9 then "critical"
@@ -85,8 +91,15 @@ FINDINGS="$(jq --arg keep_stdlib "$KEEP_STDLIB" '[
       detail: ("CVSS " + ($cvss|tostring) + "; advisories: " + ((.ids // []) | join(", "))),
       ref: ((.ids // [])[0] // "")
     }
-]' "$raw" 2>/dev/null)"
-[ -z "$FINDINGS" ] && FINDINGS='[]'
+]' "$raw" 2>"$work/normalize.err")"
+# Distinguish a jq normalization FAILURE from a genuinely empty result: a
+# failure (schema drift, etc.) must surface as scan_error, never silently
+# downgrade a populated scan to "clean". (try/catch above already prevents one
+# bad CVSS from nuking the array; this guards total normalizer failure.)
+if [ -z "$FINDINGS" ]; then
+  emit "scan_error" 0 '{}' '[]' "normalization failed — see $work/normalize.err and $work/errors.log"
+  echo "lens osv-scanner: scan_error (normalize failed)"; exit 0
+fi
 
 TOTAL="$(printf '%s' "$FINDINGS" | jq 'length' 2>/dev/null || echo 0)"
 BY_SEV="$(printf '%s' "$FINDINGS" | jq 'group_by(.severity)|map({key:.[0].severity,value:length})|from_entries' 2>/dev/null)"

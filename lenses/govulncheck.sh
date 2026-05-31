@@ -68,7 +68,8 @@ for mod in "${modules[@]}"; do
   norm="$(jq -rs --arg mod "$mod" '
     (map(select(.osv) | {(.osv.id): (.osv.summary // .osv.id)}) | add // {}) as $sum
     | [ .[] | select(.finding) | .finding
-        | select((.trace // []) | length > 0) ]
+        | select((.trace // []) | length > 0)
+        | select(.osv != null) ]
     | unique_by(.osv)
     | map({
         severity: "unknown",
