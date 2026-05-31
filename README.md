@@ -288,6 +288,21 @@ the update→scan→report loop, scheduling, and reporting around them. If honey
 is useful to you, the credit for the hard part belongs upstream — please star
 and follow [bumblebee](https://github.com/perplexityai/bumblebee).
 
+The optional [lenses](#lenses--additional-scanners-optional) wrap further
+upstream tools — honey installs none of them automatically and redistributes
+no code; each lens is inert unless you install its tool yourself:
+
+- **[NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector)** (Apache 2.0)
+  — all AI-agent-skill vulnerability detection in the `skillspector` lens.
+- **[osv-scanner](https://github.com/google/osv-scanner)** by Google / the
+  OSV-Scanner authors (Apache 2.0) — all multi-ecosystem lockfile vulnerability
+  detection in the `osv-scanner` lens.
+- **[govulncheck](https://golang.org/x/vuln)** by the Go Authors (BSD-style)
+  — all Go reachability-aware vulnerability detection in the `govulncheck` lens.
+
+All detection capability and vulnerability data are the work of these upstream
+projects. See [NOTICE](NOTICE) for full attribution.
+
 ## License
 
 honey is licensed under [Apache 2.0](LICENSE). It depends on, but does not
