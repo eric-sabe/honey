@@ -49,6 +49,16 @@ function Get-HoneySetting {
     return $Default
 }
 
+# Like Get-HoneySetting but only an UNSET var falls back to the default — an
+# explicit empty value is preserved. Mirrors bash `${VAR-default}`. Use for the
+# "set empty to disable" knobs (e.g. HONEY_*_EXCLUDE_PATHS).
+function Get-HoneySettingRaw {
+    param([string]$Name, [string]$Default)
+    $v = [Environment]::GetEnvironmentVariable($Name)
+    if ($null -ne $v) { return $v }
+    return $Default
+}
+
 # --- Status ranking (worst-wins), identical to bash overall_rank ------------
 
 function Get-StatusRank {
@@ -176,7 +186,7 @@ function ConvertFrom-JsonStream {
     return $objs
 }
 
-Export-ModuleMember -Function Get-HoneyRoot, Get-HoneyHome, Import-HoneyConfig, Get-HoneySetting,
+Export-ModuleMember -Function Get-HoneyRoot, Get-HoneyHome, Import-HoneyConfig, Get-HoneySetting, Get-HoneySettingRaw,
     Get-StatusRank, Resolve-WorseStatus, Write-LensResult, Get-SeverityFromCvss,
     Set-HoneyLatest, Get-HoneyLatest, Write-HoneyConsole, Write-HoneyLog, Get-HoneyTimestamp,
     ConvertFrom-JsonStream

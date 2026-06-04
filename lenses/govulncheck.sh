@@ -50,12 +50,23 @@ fi
 GV_VERSION="$(govulncheck -version 2>/dev/null | head -1)"
 
 # Discover Go modules (dirs containing go.mod) under the project roots.
+# Exclude copies that would duplicate (and bloat) the real module:
+#   - vendor/                : vendored deps, not your module
+#   - the Go module cache    : go/pkg/mod (read-only downloaded modules — you
+#                              can't fix code there, and it mirrors the real one)
+#   - .claude/worktrees, etc : git worktrees / scratch copies of the SAME module
+# HONEY_GOVULN_EXCLUDE_PATHS overrides the ERE; set empty to scan everything.
+# Note: ${VAR-default} (not :-) so an explicit empty value really disables it.
+GV_EXCLUDE_RE="${HONEY_GOVULN_EXCLUDE_PATHS-/(vendor|node_modules|\\.claude/worktrees)/|/(go|\\.go)/pkg/mod/}"
 modules=()
 IFS=':' read -r -a roots <<<"$PROJECT_ROOTS"
 for root in "${roots[@]}"; do
   [ -d "$root" ] || continue
-  while IFS= read -r gm; do modules+=("$(dirname "$gm")"); done \
-    < <(find "$root" -name go.mod -type f -not -path '*/vendor/*' 2>/dev/null)
+  while IFS= read -r gm; do
+    moddir="$(dirname "$gm")"
+    if [ -n "$GV_EXCLUDE_RE" ] && printf '%s' "$gm" | grep -Eq "$GV_EXCLUDE_RE"; then continue; fi
+    modules+=("$moddir")
+  done < <(find "$root" -name go.mod -type f 2>/dev/null)
 done
 
 if [ "${#modules[@]}" -eq 0 ]; then
@@ -92,12 +103,25 @@ for mod in "${modules[@]}"; do
   [ -n "$norm" ] && all="$(jq -s 'add' <(printf '%s' "$all") <(printf '%s' "$norm") 2>/dev/null)"
 done
 
+# Dedupe the SAME OSV id across modules (e.g. a stdlib CVE reachable from
+# several of your modules) into one finding, noting how many modules it spans —
+# mirrors the osv-scanner lens. HONEY_GOVULN_NO_DEDUPE=1 keeps one per module.
+if [ "${HONEY_GOVULN_NO_DEDUPE:-0}" != "1" ]; then
+  all="$(printf '%s' "$all" | jq '
+    group_by(.ref)
+    | map( .[0] as $f | ($f | .location) as $loc
+           | $f + { location: ($loc + (if (length > 1) then "  (+" + ((length-1)|tostring) + " more module(s))" else "" end)) } )
+  ' 2>/dev/null)"
+fi
+
 TOTAL="$(printf '%s' "$all" | jq 'length' 2>/dev/null || echo 0)"
 # govulncheck JSON has no CVSS; all findings are reachable => treat as high.
 all="$(printf '%s' "$all" | jq 'map(.severity = "high")' 2>/dev/null)"
 BY_SEV="$(printf '%s' "$all" | jq 'group_by(.severity)|map({key:.[0].severity,value:length})|from_entries' 2>/dev/null)"
 [ -z "$BY_SEV" ] && BY_SEV='{}'
 NOTE="scanned $scanned Go module(s) under $PROJECT_ROOTS; reachable vulns only"
+[ -n "$GV_EXCLUDE_RE" ] && NOTE="$NOTE; vendor/worktree/module-cache excluded"
+[ "${HONEY_GOVULN_NO_DEDUPE:-0}" != "1" ] && NOTE="$NOTE; deduped across modules"
 [ "$errors" -gt 0 ] && NOTE="$NOTE; $errors module error(s) — see $work/errors.log"
 
 if [ "$errors" -gt 0 ] && [ "$TOTAL" -eq 0 ]; then emit "scan_error" 0 '{}' '[]' "$NOTE"

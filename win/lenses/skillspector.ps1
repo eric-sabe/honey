@@ -48,7 +48,7 @@ $roots = @($skillRoots -split ';' | Where-Object { $_ -and (Test-Path $_) })
 # Each dir containing a SKILL.md is one skill.
 $skills = @()
 foreach ($root in $roots) {
-    Get-ChildItem -Path $root -Recurse -File -Filter 'SKILL.md' -ErrorAction SilentlyContinue |
+    Get-ChildItem -Path $root -Recurse -Force -File -Filter 'SKILL.md' -ErrorAction SilentlyContinue |
         ForEach-Object { $skills += $_.DirectoryName }
 }
 $skills = @($skills | Select-Object -Unique)

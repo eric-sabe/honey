@@ -53,11 +53,15 @@ $defaultRoots = @(
 $projectRoots = Get-HoneySetting 'HONEY_PROJECT_ROOTS' $defaultRoots
 $roots = @($projectRoots -split ';' | Where-Object { $_ -and (Test-Path $_) })
 
-# Discover Go modules (dirs with go.mod, excluding vendor/).
+# Discover Go modules (dirs with go.mod). Exclude copies that duplicate the real
+# module: vendor/, the Go module cache (go/pkg/mod - read-only downloads), and
+# git worktrees/scratch copies (.claude/worktrees). HONEY_GOVULN_EXCLUDE_PATHS
+# overrides the regex (matches both / and \); set empty to scan everything.
+$gvExclude = Get-HoneySettingRaw 'HONEY_GOVULN_EXCLUDE_PATHS' '[\\/](vendor|node_modules|\.claude[\\/]worktrees)[\\/]|[\\/](go|\.go)[\\/]pkg[\\/]mod[\\/]'
 $modules = @()
 foreach ($root in $roots) {
-    Get-ChildItem -Path $root -Recurse -File -Filter 'go.mod' -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -notmatch '[\\/]vendor[\\/]' } |
+    Get-ChildItem -Path $root -Recurse -Force -File -Filter 'go.mod' -ErrorAction SilentlyContinue |
+        Where-Object { -not $gvExclude -or $_.FullName -notmatch $gvExclude } |
         ForEach-Object { $modules += $_.DirectoryName }
 }
 $modules = @($modules | Select-Object -Unique)
@@ -123,7 +127,21 @@ foreach ($mod in $modules) {
 }
 $all = @($all)
 
+# Dedupe the SAME OSV id across modules into one finding (note module span),
+# mirroring the osv-scanner lens. HONEY_GOVULN_NO_DEDUPE=1 keeps one per module.
+if ((Get-HoneySetting 'HONEY_GOVULN_NO_DEDUPE' '0') -ne '1' -and $all.Count -gt 0) {
+    $deduped = @()
+    foreach ($grp in ($all | Group-Object ref)) {
+        $f = $grp.Group[0]
+        if ($grp.Count -gt 1) { $f.location = "$($f.location)  (+$($grp.Count - 1) more module(s))" }
+        $deduped += $f
+    }
+    $all = @($deduped)
+}
+
 $note = "scanned $scanned Go module(s) under $projectRoots; reachable vulns only"
+if ($gvExclude) { $note += "; vendor/worktree/module-cache excluded" }
+if ((Get-HoneySetting 'HONEY_GOVULN_NO_DEDUPE' '0') -ne '1') { $note += "; deduped across modules" }
 if ($errors -gt 0) { $note += "; $errors module error(s) — see $errLog" }
 
 if ($errors -gt 0 -and $all.Count -eq 0) {

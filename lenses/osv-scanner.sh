@@ -91,7 +91,8 @@ KEEP_STDLIB="${HONEY_OSV_INCLUDE_GO_STDLIB:-0}"
 # same speedline-core counted 60x across worktrees). We scan DECLARED manifests,
 # not installed copies. HONEY_OSV_EXCLUDE_PATHS overrides the regex (ERE,
 # matched against each finding's source path); set it empty to keep everything.
-EXCLUDE_RE="${HONEY_OSV_EXCLUDE_PATHS:-/(node_modules|vendor|bower_components|\\.pnpm|testdata|test/fixtures|fixtures|\\.claude/worktrees)/}"
+# ${VAR-default} (not :-) so an explicit empty value really disables the filter.
+EXCLUDE_RE="${HONEY_OSV_EXCLUDE_PATHS-/(node_modules|vendor|bower_components|\\.pnpm|testdata|test/fixtures|fixtures|\\.claude/worktrees)/}"
 
 # We DEDUPE identical (package@version + advisory) findings across paths, since
 # the same vulnerable dep appears in many lockfiles. We keep the worst-severity

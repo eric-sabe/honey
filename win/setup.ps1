@@ -57,7 +57,7 @@ function Test-CatalogPresent { param($r) (Test-Path (Join-Path $r 'threat_intel'
 if (-not $repoExplicit -and -not (Test-Path $conf) -and -not (Test-CatalogPresent $repo)) {
     Write-HoneyConsole "  looking for an existing bumblebee checkout ..."
     $found = $null
-    Get-ChildItem -Path $home_ -Recurse -Directory -Filter 'threat_intel' -Depth 6 -ErrorAction SilentlyContinue |
+    Get-ChildItem -Path $home_ -Recurse -Force -Directory -Filter 'threat_intel' -Depth 6 -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -match '[\\/]bumblebee[\\/]' } |
         ForEach-Object { if (-not $found -and (Test-CatalogPresent $_.Parent.FullName)) { $found = $_.Parent.FullName } }
     if ($found -and $found -ne $repo) {

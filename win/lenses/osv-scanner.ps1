@@ -99,7 +99,7 @@ $keepStdlib  = (Get-HoneySetting 'HONEY_OSV_INCLUDE_GO_STDLIB' '0') -eq '1'
 $dedupe      = (Get-HoneySetting 'HONEY_OSV_NO_DEDUPE' '0') -ne '1'
 # Default exclude regex: vendored/installed copies + per-worktree node_modules.
 # Matches both / and \ separators (Windows paths). Set empty to scan everything.
-$excludeRe = Get-HoneySetting 'HONEY_OSV_EXCLUDE_PATHS' '[\\/](node_modules|vendor|bower_components|\.pnpm|testdata|fixtures|\.claude[\\/]worktrees)[\\/]'
+$excludeRe = Get-HoneySettingRaw 'HONEY_OSV_EXCLUDE_PATHS' '[\\/](node_modules|vendor|bower_components|\.pnpm|testdata|fixtures|\.claude[\\/]worktrees)[\\/]'
 
 # Flatten results → one finding per (package, vuln group).
 $raw_findings = New-Object System.Collections.ArrayList
