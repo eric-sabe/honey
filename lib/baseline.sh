@@ -62,7 +62,7 @@ honey_loc_file() {
 # edit changes the bytes -> hash mismatch -> resurfaces. No NFC folding.
 honey_hash_file() {
   local f="$1" h=""
-  [ -f "$f" ] && [ -r "$f" ] || { printf ''; return; }
+  if [ ! -f "$f" ] || [ ! -r "$f" ]; then printf ''; return; fi
   if command -v sha256sum >/dev/null 2>&1; then
     h="$(sha256sum "$f" 2>/dev/null | awk '{print $1}')"
   elif command -v shasum >/dev/null 2>&1; then
