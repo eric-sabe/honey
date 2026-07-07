@@ -21,13 +21,17 @@ exactly matches a known-compromised entry in a threat-intelligence catalog.
    agent skills); the OVERALL verdict is the worst across all of them. Surface
    every scanner's findings, not just bumblebee's.
 
-   The OVERALL line may carry a suppression tally, e.g. `CLEAN (12 suppressed)`
-   or `EXPOSED — … (12 suppressed, 2 mutated)`. `suppressed` = findings the user
-   pinned as reviewed-benign in `honey.baseline.json` (dropped from the verdict —
-   don't re-alarm). `mutated` (🔁 in the report) = a pinned file CHANGED since
-   review — treat as high signal (possible rug pull), surface it, and never call
-   such a run clean. Manage pins with `./honey-baseline.sh` (see
-   [`docs/BASELINE.plan.md`](docs/BASELINE.plan.md)).
+   The OVERALL line may carry a tally, e.g. `CLEAN (12 suppressed)` or
+   `EXPOSED — … (12 suppressed, 65 review, 2 mutated)`. `suppressed` = findings
+   the user pinned as reviewed-benign in `honey.baseline.json` (dropped from the
+   verdict — don't re-alarm). `review` = active findings held below the severity
+   floor (verdict policy — usually first-party low/medium noise): reported but
+   non-blocking, so a `review`-only run is clean; summarize, don't alarm.
+   `mutated` (🔁 in the report) = a pinned file CHANGED since review — treat as
+   high signal (possible rug pull), surface it, and never call such a run clean.
+   Manage pins with `./honey-baseline.sh`; tune the floor with
+   `HONEY_VERDICT_FLOOR_TRUSTED` (see [`docs/BASELINE.plan.md`](docs/BASELINE.plan.md)
+   and [`docs/VERDICT.plan.md`](docs/VERDICT.plan.md)).
 
 2. For detail beyond the report, read the run dir:
    - `manifest.json`   — bumblebee verdict, counts, metadata.

@@ -82,5 +82,5 @@ if (Test-Path $lensDir) {
 $eff = Get-HoneyEffectiveOverall -RunDir $runDir
 $overall = Resolve-WorseStatus $eff.status $crash
 
-Log "=== cycle end (bumblebee=$bbStatus overall=$overall suppressed=$($eff.suppressed) mutated=$($eff.mutated) expired=$($eff.expired)) ==="
+Log "=== cycle end (bumblebee=$bbStatus overall=$overall suppressed=$($eff.suppressed) mutated=$($eff.mutated) expired=$($eff.expired) review=$($eff.review)) ==="
 if ($overall -eq 'clean') { exit 0 } else { exit 1 }

@@ -52,8 +52,9 @@ if (Test-Path $sumPath) {
 $L = New-Object System.Collections.ArrayList
 function Emit { param($s) [void]$L.Add($s) }
 
-# Suppression tallies, accumulated across bumblebee + every lens as we render.
-$script:sup = 0; $script:mut = 0; $script:exp = 0
+# Suppression + verdict-policy tallies, accumulated across bumblebee + every
+# lens. rev = active findings held below the severity floor (review tier).
+$script:sup = 0; $script:mut = 0; $script:exp = 0; $script:rev = 0
 # A class marker printed before a finding line (mutated/expired resurface loudly).
 function Get-ClassMarker { param($c) switch ($c) { 'mutated' { '[MUTATED] ' } 'expired' { '[EXPIRED-PIN] ' } default { '' } } }
 
@@ -119,45 +120,68 @@ Get-ChildItem -Path $RunDir -Filter 'lens-*.json' -ErrorAction SilentlyContinue 
         'exposed'    {
             $cls = Get-HoneyClassifiedLens -Scanner $name -LensObj $lj
             $s = @($cls | Where-Object { $_._class -eq 'suppressed' }).Count
-            $active = @($cls | Where-Object { $_._class -ne 'suppressed' })
+            $blocking = @($cls | Where-Object { $_._class -ne 'suppressed' -and $_._blocking -eq 'yes' })
+            $review   = @($cls | Where-Object { $_._class -ne 'suppressed' -and $_._blocking -eq 'no' })
             $script:sup += $s
             $script:mut += @($cls | Where-Object { $_._class -eq 'mutated' }).Count
             $script:exp += @($cls | Where-Object { $_._class -eq 'expired' }).Count
-            if ($active.Count -eq 0) {
+            $script:rev += $review.Count
+            if (($blocking.Count + $review.Count) -eq 0) {
                 Emit "[OK] lens ${name}: clean - all $tot finding(s) suppressed by baseline. ($note)"
             } else {
-                $overall = Resolve-WorseStatus $overall 'exposed'
-                $bySev = @($active) | Group-Object severity | ForEach-Object { "$($_.Count) $($_.Name)" }
-                $supStr = if ($s -gt 0) { "  (+$s suppressed)" } else { "" }
-                Emit "[!!] lens ${name}: $($active.Count) finding(s) [$(( $bySev ) -join ', ')]$supStr  ($note)"
-                $rank = @{ critical=0; high=1; medium=2; low=3; unknown=4 }
-                @($active) | Sort-Object @{ Expression = { $r = $rank[[string](Get-Prop $_ 'severity' 'unknown')]; if ($null -eq $r) { 9 } else { $r } } } | ForEach-Object {
-                    Emit ("  - {0}{1}  {2}" -f (Get-ClassMarker $_._class), (Get-Prop $_ 'severity' '?').ToUpper(), (Get-Prop $_ 'title' '?'))
-                    $loc = Get-Prop $_ 'location' ''
-                    if ($loc) { Emit "      where : $loc" }
-                    $det = Get-Prop $_ 'detail' ''
-                    if ($det) { Emit "      detail: $det" }
-                    if ($_._class -eq 'mutated') { Emit "      note  : content changed since this was pinned reviewed-benign - re-review before re-pinning." }
+                $extras = ""
+                if ($s -gt 0) { $extras += "  (+$s suppressed)" }
+                if ($blocking.Count -gt 0 -and $review.Count -gt 0) { $extras += "  (+$($review.Count) review)" }
+                if ($blocking.Count -gt 0) {
+                    $overall = Resolve-WorseStatus $overall 'exposed'
+                    $bySev = @($blocking) | Group-Object severity | ForEach-Object { "$($_.Count) $($_.Name)" }
+                    Emit "[!!] lens ${name}: $($blocking.Count) finding(s) [$(( $bySev ) -join ', ')]$extras  ($note)"
+                } else {
+                    Emit "[~] lens ${name}: $($review.Count) review finding(s) - non-blocking (first-party or below the severity floor)$extras  ($note)"
                 }
+                $rank = @{ critical=0; high=1; medium=2; low=3; unknown=4 }
+                @($cls | Where-Object { $_._class -ne 'suppressed' }) |
+                    Sort-Object @{ Expression = { if ($_._blocking -eq 'yes') { 0 } else { 1 } } }, @{ Expression = { $r = $rank[[string](Get-Prop $_ 'severity' 'unknown')]; if ($null -eq $r) { 9 } else { $r } } } |
+                    ForEach-Object {
+                        $ptag = if ($_._provenance -eq 'first-party') { '  [1st-party]' } else { '' }
+                        if ($_._blocking -eq 'no') {
+                            Emit ("  o review {0}  {1} [non-blocking]" -f (Get-Prop $_ 'severity' '?').ToUpper(), (Get-Prop $_ 'title' '?'))
+                            Emit "      where : $(Get-Prop $_ 'location' '')"
+                        } else {
+                            Emit ("  - {0}{1}  {2}{3}" -f (Get-ClassMarker $_._class), (Get-Prop $_ 'severity' '?').ToUpper(), (Get-Prop $_ 'title' '?'), $ptag)
+                            $loc = Get-Prop $_ 'location' ''
+                            if ($loc) { Emit "      where : $loc" }
+                            $det = Get-Prop $_ 'detail' ''
+                            if ($det) { Emit "      detail: $det" }
+                            if ($_._class -eq 'mutated') { Emit "      note  : content changed since this was pinned reviewed-benign - re-review before re-pinning." }
+                        }
+                    }
             }
         }
     }
 }
 
-# --- suppression summary ----------------------------------------------------
-if (($script:sup + $script:mut + $script:exp) -gt 0) {
+# --- suppression / policy summary -------------------------------------------
+if (($script:sup + $script:mut + $script:exp + $script:rev) -gt 0) {
     Emit ""
     Emit "baseline: $($script:sup) suppressed, $($script:mut) mutated, $($script:exp) expired - honey.baseline.json. Review: honey-baseline.ps1 status"
+    if ($script:rev -gt 0) {
+        $ft = Get-HoneySetting 'HONEY_VERDICT_FLOOR' 'none'
+        $ftt = Get-HoneySetting 'HONEY_VERDICT_FLOOR_TRUSTED' $ft
+        Emit "policy: $($script:rev) finding(s) held below the severity floor (review tier, non-blocking). Floor: $ft / trusted $ftt."
+    }
     if ($script:mut -gt 0) { Emit "[!!] $($script:mut) MUTATED: a file pinned as reviewed-benign has CHANGED. Treat as a possible rug pull and re-review." }
 }
 
 # --- overall verdict --------------------------------------------------------
 $suffix = ""
-if (($script:sup + $script:mut + $script:exp) -gt 0) {
-    $suffix = " ($($script:sup) suppressed"
-    if ($script:mut -gt 0) { $suffix += ", $($script:mut) mutated" }
-    if ($script:exp -gt 0) { $suffix += ", $($script:exp) expired" }
-    $suffix += ")"
+if (($script:sup + $script:mut + $script:exp + $script:rev) -gt 0) {
+    $parts = @()
+    if ($script:sup -gt 0) { $parts += "$($script:sup) suppressed" }
+    if ($script:rev -gt 0) { $parts += "$($script:rev) review" }
+    if ($script:mut -gt 0) { $parts += "$($script:mut) mutated" }
+    if ($script:exp -gt 0) { $parts += "$($script:exp) expired" }
+    $suffix = " (" + ($parts -join ', ') + ")"
 }
 
 Emit ""
