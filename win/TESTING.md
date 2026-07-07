@@ -2,7 +2,8 @@
 
 The PowerShell variant under `win/` was authored and tested on macOS pwsh 7.5.4
 (the orchestration, all three lens normalizers, run-scan, daily-cycle, report,
-setup, doctor — all verified behavior-identical to the bash version). What
+setup, doctor, and the suppression baseline classifier + CLI — all verified
+behavior-identical to the bash version). What
 **couldn't** be tested off-Windows is marked **[W]** below: Windows toast
 notifications, Task Scheduler, real `C:\` paths, and the real scanners on
 Windows. That's what this guide is for.
@@ -87,6 +88,35 @@ pwsh -File win\report.ps1
 **Expected:** a section per scanner and a final `OVERALL: <verdict>` line. Exit 0
 only if `OVERALL: CLEAN`. **Confirm the false-all-clear guard:** if bumblebee is
 clean but a lens found something, the OVERALL must read EXPOSED (not "all clear").
+
+## 4b. honey-baseline.ps1 — suppression baseline (pin-and-diff)
+
+The classifier, all five subcommands, and the report/daily-cycle integration
+were verified on macOS pwsh 7.5.4 (behavior-identical to the bash side, incl.
+byte-identical file hashes). What's worth re-confirming on Windows is that real
+`C:\` locations pin, suppress, and diff correctly.
+
+```powershell
+# Pick a lens finding from the latest run and pin it:
+pwsh -File win\honey-baseline.ps1 status                              # tally: active/suppressed/mutated/expired
+pwsh -File win\honey-baseline.ps1 add -Scanner skillspector -Location references\ `
+    -Reason "first-party marketplace docs" -Expires 90
+pwsh -File win\honey-baseline.ps1 list                                # shows the new pin(s)
+pwsh -File win\report.ps1                                             # those findings now show as suppressed; OVERALL carries "(N suppressed)"
+```
+
+**Expected / confirm:**
+- `add` writes `honey.baseline.json` at the repo root with `~`-relative
+  `location` values (home collapsed to `~`, **not** an absolute `C:\Users\…`).
+- After `add`, `report.ps1` drops the pinned findings from the verdict and the
+  OVERALL line reads e.g. `EXPOSED (N suppressed)` — never a bare all-clear.
+- **[W] the mutation tripwire:** edit one pinned file (append a space to a
+  `references\*.md` that was pinned), then re-run `report.ps1` — that finding
+  must resurface tagged `[MUTATED]` and OVERALL must show `… mutated`.
+- `remove` / `prune` behave as `list` reports; `add` is idempotent (re-running
+  the same `add` doesn't duplicate entries).
+- A bumblebee match is excluded by `-All`; pinning one needs explicit
+  `-Scanner bumblebee`.
 
 ## 5. [W] notify-cycle.ps1 — scan + Windows toast
 

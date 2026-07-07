@@ -51,6 +51,20 @@ CRITICAL — do not produce a false all-clear:
     prints `OVERALL: EXPOSED` (or INCOMPLETE / SCAN_ERROR), the run is NOT
     clear — even if bumblebee itself was clean.
 
+SUPPRESSION BASELINE — the OVERALL line may carry a tally, e.g.
+`OVERALL: CLEAN (12 suppressed)` or `OVERALL: EXPOSED — … (12 suppressed, 2 mutated)`:
+  • `suppressed` = findings the user reviewed and pinned as benign in
+    honey.baseline.json; they are intentionally dropped from the verdict. Do NOT
+    re-alarm on them — mention the count in passing, nothing more.
+  • `mutated` = a file that was pinned reviewed-benign has CHANGED since it was
+    pinned (marked 🔁 MUTATED in the report). Treat this as HIGH signal — a
+    possible rug pull / tampered dependency — surface it prominently and never
+    fold it into "all clear". A run with any `mutated` is never CLEAN.
+  • `expired` = a pin passed its expiry and resurfaced; treat as a normal active
+    finding due for re-review.
+  • `CLEAN (N suppressed)` is still all-clear — but say "all clear (N previously
+    reviewed findings suppressed)", not a bare "all clear".
+
 Treat report.sh's output as the factual baseline; do not contradict it or
 invent findings beyond it. For extra detail read HONEY_DIR/latest/lens-*.json
 (each lens's normalized findings: severity, title, location, detail, ref) and,

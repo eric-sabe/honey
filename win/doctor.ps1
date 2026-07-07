@@ -8,6 +8,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib' 'Honey.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'lib' 'Baseline.psm1') -Force
 Import-HoneyConfig
 
 $home_ = Get-HoneyHome
@@ -73,6 +74,20 @@ $lensTools = [ordered]@{
 foreach ($t in $lensTools.Keys) {
     if (Get-Command $t -ErrorAction SilentlyContinue) { Ok "lens $t active" }
     else { Write-HoneyConsole "  [ ] lens $t inactive (optional)"; Hint $lensTools[$t] }
+}
+
+# Suppression baseline (informational; never affects pass/fail).
+Write-HoneyConsole ""
+Write-HoneyConsole "suppression baseline:"
+$bfile = Get-HoneyBaselineFile
+if (Test-Path -LiteralPath $bfile) {
+    $entries = @(Get-HoneyBaselineEntry)
+    $today = Get-HoneyToday
+    $expired = @($entries | Where-Object { $_.expires -ne 'never' -and [string]$_.expires -lt $today }).Count
+    Ok "baseline present ($($entries.Count) pin(s)) - $bfile"
+    if ($expired -gt 0) { Hint "$expired pin(s) expired; review with honey-baseline.ps1 list -Expired, then honey-baseline.ps1 prune" }
+} else {
+    Ok "no baseline yet (all findings active) - create pins with honey-baseline.ps1 add"
 }
 
 Write-HoneyConsole ""

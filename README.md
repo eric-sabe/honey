@@ -163,6 +163,60 @@ and honey treats them differently:
   honey never mutates Python environments. Re-install it periodically per its
   README to get new patterns.
 
+## Suppression baseline (pin-and-diff)
+
+Static scanners are noisy. A daily run over trusted, first-party agent skills
+can emit dozens of findings that are false positives against reference or
+documentation material — enough to drag `OVERALL` to `EXPOSED` every day and
+bury a *real* finding. honey lets you acknowledge a reviewed-benign finding
+**once** so it stops contributing to the daily verdict — without going blind to
+the thing honey exists to catch.
+
+The mechanism is **pin, not mute**. A suppression entry doesn't say "ignore this
+skill" (trust-by-location is blindness-by-location — a first-party plugin that
+ships a malicious update keeps its path). It says *"I reviewed this exact content
+and judged this finding benign — tell me the instant the content changes."* Each
+entry records a **sha256 of the referenced file**, so:
+
+- pinned finding, file **unchanged** → **suppressed** (dropped from the verdict, still counted);
+- pinned finding, file **changed** → **MUTATED** — resurfaces loudly (the rug-pull tripwire);
+- pin past its **expiry** (default 90 days) → resurfaces as normal.
+
+Every suppressed finding is therefore also a change-detector on the content it
+vouches for. Suppression is a **report-layer re-rank, never a deletion** — raw
+run records are untouched — and a suppressed run **never** reads as a bare
+all-clear: the verdict always carries the tallies, e.g.
+`OVERALL: CLEAN (12 suppressed)` or `OVERALL: EXPOSED — … (12 suppressed, 2 mutated)`.
+Design details and the threat model are in [`docs/BASELINE.plan.md`](docs/BASELINE.plan.md).
+
+**Manage it** with [`honey-baseline.sh`](honey-baseline.sh) (Windows:
+[`win/honey-baseline.ps1`](win/honey-baseline.ps1)) — it only edits
+`honey.baseline.json`, never your system:
+
+```bash
+./honey-baseline.sh status                       # dry-run: suppressed/mutated/expired/active tally
+./honey-baseline.sh add --scanner skillspector \
+    --location references/ \
+    --reason "first-party marketplace docs; describes patterns, not executable" --expires 90
+./honey-baseline.sh list [--expired|--active]     # review pins (flags expired)
+./honey-baseline.sh remove --scanner skillspector --location references/
+./honey-baseline.sh prune                         # drop expired pins
+```
+
+`add` filters are combinable (AND): `--all` (excludes bumblebee), `--scanner`,
+`--severity`, `--rule`, `--location`. Pinning a **bumblebee** (known-compromised)
+match is opt-in and loud — `--all` excludes it; you must name `--scanner
+bumblebee` explicitly. `honey.baseline.json` is **committed and reviewable** on
+purpose: baseline edits show up in `git diff` / PR review, which is itself an
+anti-gaming control.
+
+**What it does and does not defend.** The content hash is the right defense
+against silent post-review mutation (manifest-alteration rug pulls, source
+swaps). It is structurally blind to payloads that were never flagged in the
+first place — sleeper/trigger-activated code, instructions fetched from a remote
+URL at runtime, or content hidden in bundled images. The baseline can only
+suppress what a lens surfaced; widening the scanned surface is separate work.
+
 ## Optional: daily Slack triage via a Claude Local routine
 
 If you use [Claude Code](https://claude.com/claude-code) and have the Slack
@@ -293,6 +347,7 @@ one-off run. You can also hand-edit `honey.conf` — one `export VAR=…` per li
 | `HONEY_OSV_EXCLUDE_PATHS` | `node_modules`/`vendor`/`.pnpm`/`testdata`/`fixtures`/`.claude/worktrees` (ERE) | osv-scanner: skip findings whose source path matches — keeps the scan on *declared* manifests, not installed/vendored copies. Set empty to scan everything. |
 | `HONEY_OSV_NO_DEDUPE` | `0` | osv-scanner: `1` keeps one finding per path; default collapses identical `package@version`+advisory across paths into one (`+N more`) |
 | `HONEY_SKILLSPECTOR_LLM` | `0` | skillspector: enable its own LLM stage (default static `--no-llm`) |
+| `HONEY_BASELINE` | `<repo>/honey.baseline.json` | path to the suppression baseline (pin-and-diff); see [Suppression baseline](#suppression-baseline-pin-and-diff) |
 
 ## Layout
 
@@ -305,13 +360,18 @@ honey/
 ├── daily-cycle.sh    # one cycle: run-scan, exit 0=clean / 1=needs attention
 ├── notify-cycle.sh   # scan + native desktop notification (no-Claude path)
 ├── report.sh         # deterministic triage report (bumblebee + all lenses; no AI)
+├── honey-baseline.sh # manage the pin-and-diff suppression baseline (add/list/remove/prune/status)
+├── honey.baseline.json # the suppression baseline (committed & reviewable; NOT gitignored)
 ├── install-schedule.sh # schedule notify-cycle via launchd (macOS) / cron (Linux)
+├── lib/baseline.sh   # shared suppression classifier (sourced by report/daily-cycle/CLI)
 ├── lenses/           # optional additional scanners, each self-skips if its tool is absent
 │   ├── skillspector.sh  # AI agent skills (NVIDIA SkillSpector)
 │   ├── osv-scanner.sh   # multi-ecosystem lockfile vulns (Google/OSV)
 │   └── govulncheck.sh   # Go reachability-aware vulns (Go vuln team)
+├── docs/BASELINE.plan.md # suppression baseline design + threat model
 ├── routine-prompt.md # prompt for the Claude Local routine (scheduled path)
 ├── triage-guide.md   # guide for triaging a run by hand in a chat
+├── win/              # native Windows (PowerShell 7) port — mirrors every script above
 ├── runs/<TS>/        # one timestamped run per scan (gitignored — host inventory)
 │   ├── manifest.json      # bumblebee verdict + metadata
 │   ├── findings.ndjson    # bumblebee finding records
@@ -320,7 +380,9 @@ honey/
 ```
 
 `runs/`, `latest`, and `*.log` are **gitignored** — they contain an inventory
-of your machine and should never be published.
+of your machine and should never be published. `honey.baseline.json` is
+deliberately **not** gitignored: suppression pins are meant to be reviewed in
+version control.
 
 ## Troubleshooting
 

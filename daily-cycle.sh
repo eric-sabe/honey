@@ -24,6 +24,10 @@ CYCLE_LOG="$HONEY/cycle.log"
 # so a bare-env Local routine or cron job picks it up. env var > honey.conf > default.
 # shellcheck source=lib/load-config.sh
 . "$HONEY/lib/load-config.sh"
+# Suppression baseline classifier, so the cycle's exit code honors pinned
+# findings exactly as report.sh does (one source of truth for the verdict).
+# shellcheck source=lib/baseline.sh
+. "$HONEY/lib/baseline.sh"
 
 # A scheduler / Local routine may hand us a bare PATH. Ensure the dirs that
 # hold the scanners are findable BEFORE we invoke run-scan and the lenses —
@@ -75,7 +79,9 @@ clog "manifest status=$STATUS findings=$TOTAL run_dir=$RUN_DIR"
 overall_rank() {  # map a status to a severity rank for "worst wins"
   case "$1" in scan_error) echo 4;; exposed) echo 3;; incomplete) echo 2;; clean) echo 1;; *) echo 0;; esac
 }
-OVERALL="$STATUS"
+# CRASH tracks only lenses that RAN but wrote no verdict — a genuine crash must
+# always escalate, and the baseline (which reads written JSON) can't see it.
+CRASH="clean"
 if [ -d "$HONEY/lenses" ]; then
   for lens in "$HONEY/lenses"/*.sh; do
     [ -f "$lens" ] || continue   # no lenses installed → loop body never runs
@@ -89,17 +95,25 @@ if [ -d "$HONEY/lenses" ]; then
     # "skipped" JSON, so this only triggers on a genuine crash.)
     if [ ! -f "$LJSON" ] || ! jq -e '.status' "$LJSON" >/dev/null 2>&1; then
       clog "lens $lname: CRASHED (rc=$LRC, no valid verdict) — escalating to scan_error"
-      [ "$(overall_rank scan_error)" -gt "$(overall_rank "$OVERALL")" ] && OVERALL="scan_error"
+      CRASH="scan_error"
       continue
     fi
     LSTATUS="$(jq -r '.status' "$LJSON" 2>/dev/null)"
     LTOTAL="$(jq -r '.findings_total' "$LJSON" 2>/dev/null)"
     clog "lens $lname: status=$LSTATUS findings=$LTOTAL"
-    [ "$LSTATUS" = "skipped" ] && continue
-    [ "$(overall_rank "$LSTATUS")" -gt "$(overall_rank "$OVERALL")" ] && OVERALL="$LSTATUS"
   done
 fi
 
-clog "=== cycle end (bumblebee=$STATUS overall=$OVERALL) ==="
+# Effective verdict AFTER the suppression baseline: report.sh and this cycle
+# must agree, so both go through the same classifier. baseline_effective_overall
+# recomputes worst-wins over bumblebee + every written lens JSON, dropping
+# suppressed findings (but never downgrading incomplete/scan_error, and always
+# surfacing MUTATED pins). A crashed lens (no JSON) is then worst-wins'd in.
+EFF="$(baseline_effective_overall "$RUN_DIR")"
+OVERALL="$(printf '%s' "$EFF" | awk '{print $1}')"
+SUPPCOUNTS="$(printf '%s' "$EFF" | cut -d' ' -f2-)"
+[ "$(overall_rank "$CRASH")" -gt "$(overall_rank "$OVERALL")" ] && OVERALL="$CRASH"
+
+clog "=== cycle end (bumblebee=$STATUS overall=$OVERALL $SUPPCOUNTS) ==="
 # 0 when overall clean; 1 when anything (bumblebee or a lens) needs attention.
 [ "$OVERALL" = "clean" ] && exit 0 || exit 1

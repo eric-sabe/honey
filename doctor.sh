@@ -8,6 +8,9 @@
 set -uo pipefail
 HONEY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$HONEY_DIR/lib/preflight.sh"
+HONEY="${HONEY:-$HONEY_DIR}"
+# shellcheck source=lib/baseline.sh
+. "$HONEY_DIR/lib/baseline.sh"
 
 echo "honey doctor — checking dependencies"
 echo
@@ -55,6 +58,20 @@ if [ -d "$HONEY/lenses" ] && ls "$HONEY"/lenses/*.sh >/dev/null 2>&1; then
     esac
   done
 fi
+# Suppression baseline — informational; never affects pass/fail. Shows how many
+# findings you've pinned as reviewed-benign and whether any pins have expired.
+BFILE="$(honey_baseline_file)"
+echo
+echo "suppression baseline:"
+if [ -f "$BFILE" ]; then
+  BN="$(honey_baseline_entries | jq 'length' 2>/dev/null || echo 0)"
+  BEXP="$(honey_baseline_entries | jq --arg t "$(honey_today)" '[.[]|select(.expires!="never" and .expires < $t)]|length' 2>/dev/null || echo 0)"
+  ok "baseline present ($BN pin(s)) — $BFILE"
+  [ "${BEXP:-0}" -gt 0 ] && hint "$BEXP pin(s) expired; review with ./honey-baseline.sh list --expired, then ./honey-baseline.sh prune"
+else
+  ok "no baseline yet (all findings active) — create pins with ./honey-baseline.sh add"
+fi
+
 echo
 if [ "$fails" -eq 0 ]; then
   printf '%sAll checks passed — honey is ready.%s Run:  ./daily-cycle.sh\n' "$C_OK" "$C_OFF"
