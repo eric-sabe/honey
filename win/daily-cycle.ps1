@@ -14,6 +14,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'lib' 'Honey.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'lib' 'Baseline.psm1') -Force
 Import-HoneyConfig
 
 $honeyRoot = Get-HoneyRoot
@@ -48,8 +49,9 @@ $bbStatus = [string]$manifest.status
 $bbTotal  = $manifest.findings_total
 Log "manifest status=$bbStatus findings=$bbTotal run_dir=$runDir"
 
-# 2. Lenses. Worst-wins; a lens that RAN but wrote no valid verdict -> scan_error.
-$overall = $bbStatus
+# 2. Lenses. Run each; the effective verdict is computed afterward through the
+# suppression baseline. $crash tracks only lenses that ran but wrote no verdict.
+$crash = 'clean'
 $lensDir = Join-Path $PSScriptRoot 'lenses'
 if (Test-Path $lensDir) {
     foreach ($lens in Get-ChildItem -Path $lensDir -Filter '*.ps1' | Sort-Object Name) {
@@ -61,17 +63,24 @@ if (Test-Path $lensDir) {
             try { $null = Get-Content -LiteralPath $ljPath -Raw | ConvertFrom-Json; $ok = $true } catch { $ok = $false }
         }
         if (-not $ok) {
+            # A lens that RAN but wrote no verdict is a genuine crash; the
+            # baseline (which reads written JSON) can't see it, so track it here.
             Log "lens ${lname}: CRASHED (no valid verdict) - escalating to scan_error"
-            $overall = Resolve-WorseStatus $overall 'scan_error'
+            $crash = Resolve-WorseStatus $crash 'scan_error'
             continue
         }
         $lj = Get-Content -LiteralPath $ljPath -Raw | ConvertFrom-Json
         $lstatus = [string]$lj.status
         Log "lens ${lname}: status=$lstatus findings=$($lj.findings_total)"
-        if ($lstatus -eq 'skipped') { continue }
-        $overall = Resolve-WorseStatus $overall $lstatus
     }
 }
 
-Log "=== cycle end (bumblebee=$bbStatus overall=$overall) ==="
+# Effective verdict AFTER the suppression baseline, via the same classifier
+# report.ps1 uses (one source of truth). Suppressed findings drop out; MUTATED
+# pins resurface; incomplete/scan_error are never downgraded. Then worst-wins
+# the crashed-lens escalation in.
+$eff = Get-HoneyEffectiveOverall -RunDir $runDir
+$overall = Resolve-WorseStatus $eff.status $crash
+
+Log "=== cycle end (bumblebee=$bbStatus overall=$overall suppressed=$($eff.suppressed) mutated=$($eff.mutated) expired=$($eff.expired)) ==="
 if ($overall -eq 'clean') { exit 0 } else { exit 1 }

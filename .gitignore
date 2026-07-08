@@ -10,6 +10,10 @@ cycle.log
 honey.conf
 honey.conf.ps1
 
+# NOTE: honey.baseline.json is intentionally NOT ignored. Suppression pins are
+# committed and reviewed in git — that auditability is an anti-gaming control
+# (see docs/BASELINE.plan.md). Do not add it here.
+
 # Local secrets, if you ever add any (e.g. Slack webhook/token).
 secrets.env
 *.env

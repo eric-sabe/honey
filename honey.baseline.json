@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "note": "honey suppression baseline. Each entry pins a reviewed-benign finding by (scanner, rule, ~-relative location, occurrence index) AND a sha256 of the referenced content; a matching finding whose content still hashes the same is suppressed, and a pinned file whose content CHANGES resurfaces as MUTATED. Manage with ./honey-baseline.sh (add/list/remove/prune/status). This file is committed and reviewable on purpose. See docs/BASELINE.plan.md.",
+  "entries": []
+}

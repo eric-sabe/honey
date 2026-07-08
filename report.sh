@@ -8,6 +8,12 @@
 # the analysis for the no-Claude path; the Claude routine produces richer,
 # tailored prose, but the facts and standard fixes are all here deterministically.
 #
+# The pin-and-diff suppression baseline (honey.baseline.json) is applied here at
+# the report layer: findings pinned as reviewed-benign AND still matching their
+# recorded content hash are SUPPRESSED (dropped from the verdict, still counted);
+# a pinned file whose content CHANGED resurfaces as MUTATED. Raw run records are
+# never modified — suppression is a re-rank, not a deletion. See docs/BASELINE.plan.md.
+#
 # RUN_DIR defaults to the `latest` symlink. Exit 0 clean / 1 needs attention.
 
 set -uo pipefail
@@ -18,6 +24,9 @@ FINDINGS="$RUN_DIR/findings.ndjson"
 
 [ -f "$MANIFEST" ] || { echo "report: no manifest at $MANIFEST" >&2; exit 1; }
 
+# shellcheck source=lib/baseline.sh
+. "$HONEY/lib/baseline.sh"
+
 if [ -t 1 ]; then B=$'\033[1m'; D=$'\033[2m'; R=$'\033[31m'; Y=$'\033[33m'; G=$'\033[32m'; O=$'\033[0m'
 else B=""; D=""; R=""; Y=""; G=""; O=""; fi
 
@@ -27,6 +36,9 @@ ROOT="$(j '.scan_root')"; VER="$(j '.scanner_version')"; WHEN="$(j '.finished_at
 COMPLETED="$(j '.scan_completed')"; CATDIR="$(j '.catalog_dir')"
 FILES="$(jq -r '.files_considered // "?"' "$RUN_DIR/summary.json" 2>/dev/null)"
 [ -z "$FILES" ] && FILES="?"   # summary.json may be empty/absent on scan_error
+
+# Suppression tallies, accumulated across bumblebee + every lens as we render.
+SUP=0; MUT=0; EXP=0
 
 # Remediation guidance per ecosystem. Generic but correct starting points;
 # always "run manually" — honey never changes state.
@@ -47,9 +59,20 @@ remediation() {  # ecosystem package version
 # severity → rank, for "worst wins" across bumblebee + every lens.
 rank() { case "$1" in scan_error) echo 4;; exposed) echo 3;; incomplete) echo 2;; clean|skipped) echo 1;; *) echo 0;; esac; }
 
+ORDER='{"critical":0,"high":1,"medium":2,"low":3,"unknown":4}'
+
+# A class marker printed before a finding line (mutated/expired resurface loudly).
+class_prefix() {  # _class → printed prefix (empty for plain active)
+  case "$1" in
+    mutated) printf '%s🔁 MUTATED%s ' "$R" "$O" ;;
+    expired) printf '%s⌛ EXPIRED-PIN%s ' "$Y" "$O" ;;
+    *) : ;;
+  esac
+}
+
 # render_lenses — print a section per lens-*.json in the run dir, and update
-# OVERALL to the worst status seen. Lenses are honey's additional scanners
-# (e.g. skillspector for agent skills); absent ones simply don't appear.
+# OVERALL to the worst status seen (AFTER suppression). Lenses are honey's
+# additional scanners; absent ones simply don't appear.
 OVERALL="$STATUS"
 render_lenses() {
   local lj name lstatus ltotal lnote
@@ -59,32 +82,53 @@ render_lenses() {
     lstatus="$(jq -r '.status' "$lj" 2>/dev/null)"
     ltotal="$(jq -r '.findings_total' "$lj" 2>/dev/null)"
     lnote="$(jq -r '.note // empty' "$lj" 2>/dev/null)"
-    [ "$(rank "$lstatus")" -gt "$(rank "$OVERALL")" ] && OVERALL="$lstatus"
     echo
     case "$lstatus" in
       skipped)    echo "${D}— lens ${name}: skipped${O} (${lnote})"; continue ;;
       clean)      echo "${G}✓ lens ${name}: clean${O} (${lnote})"; continue ;;
-      scan_error) echo "${R}✗ lens ${name}: scan error${O} (${lnote})"; continue ;;
-      incomplete) echo "${Y}⚠ lens ${name}: incomplete${O} (${lnote})"; continue ;;
+      scan_error) echo "${R}✗ lens ${name}: scan error${O} (${lnote})"
+                  [ "$(rank scan_error)" -gt "$(rank "$OVERALL")" ] && OVERALL="scan_error"; continue ;;
+      incomplete) echo "${Y}⚠ lens ${name}: incomplete${O} (${lnote})"
+                  [ "$(rank incomplete)" -gt "$(rank "$OVERALL")" ] && OVERALL="incomplete"; continue ;;
     esac
-    # exposed → list its findings worst-severity first.
-    local by; by="$(jq -r '.findings_by_severity | to_entries | map("\(.value) \(.key)") | join(", ")' "$lj" 2>/dev/null)"
-    echo "${R}🚨 lens ${name}: ${ltotal} finding(s)${O} [$by]  ${D}(${lnote})${O}"
-    jq -rs --argjson ord "$ORDER" '.[0] | (.findings // [])
-      | sort_by($ord[.severity] // 9)[]
-      | [.severity,.title,.location,.detail,.ref] | @tsv' "$lj" 2>/dev/null \
-    | while IFS=$'\t' read -r SEV TITLE LOC DET REF; do
+
+    # exposed → classify against the baseline, then render only the findings
+    # that still contribute (active + mutated + expired). Suppressed ones are
+    # counted and summarized, not listed.
+    local cls s m e a
+    cls="$(honey_classify_lens "$name" "$lj")"
+    s="$(printf '%s\n' "$cls" | jq -r 'select(._class=="suppressed")|1' 2>/dev/null | grep -c .)"
+    m="$(printf '%s\n' "$cls" | jq -r 'select(._class=="mutated")|1'    2>/dev/null | grep -c .)"
+    e="$(printf '%s\n' "$cls" | jq -r 'select(._class=="expired")|1'    2>/dev/null | grep -c .)"
+    a="$(printf '%s\n' "$cls" | jq -r 'select(._class!="suppressed")|1' 2>/dev/null | grep -c .)"
+    SUP=$((SUP+s)); MUT=$((MUT+m)); EXP=$((EXP+e))
+
+    if [ "$a" -eq 0 ]; then
+      # Every finding suppressed: this lens no longer contributes to the verdict.
+      echo "${G}✓ lens ${name}: clean${O} — all ${ltotal} finding(s) suppressed by baseline. ${D}(${lnote})${O}"
+      continue
+    fi
+    [ "$(rank exposed)" -gt "$(rank "$OVERALL")" ] && OVERALL="exposed"
+
+    local by supnote=""
+    by="$(printf '%s\n' "$cls" | jq -rs 'map(select(._class!="suppressed")) | group_by(.severity)
+      | map("\(length) \(.[0].severity)") | join(", ")' 2>/dev/null)"
+    [ "$s" -gt 0 ] && supnote="  ${D}(+${s} suppressed)${O}"
+    echo "${R}🚨 lens ${name}: ${a} finding(s)${O} [$by]${supnote}  ${D}(${lnote})${O}"
+    printf '%s\n' "$cls" | jq -rs --argjson ord "$ORDER" '
+        map(select(._class!="suppressed")) | sort_by($ord[.severity] // 9)[]
+        | [.severity,.title,.location,.detail,.ref,._class] | @tsv' 2>/dev/null \
+    | while IFS=$'\t' read -r SEV TITLE LOC DET REF CLASS; do
         case "$SEV" in critical|high) C="$R";; medium) C="$Y";; *) C="$D";; esac
         SEV_UC="$(printf '%s' "$SEV" | tr '[:lower:]' '[:upper:]')"
         REFSUFFIX=""; [ -n "$REF" ] && REFSUFFIX="  ${D}(${REF})${O}"
-        echo "  ${C}● ${SEV_UC}${O}  ${B}${TITLE}${O}${REFSUFFIX}"
+        echo "  $(class_prefix "$CLASS")${C}● ${SEV_UC}${O}  ${B}${TITLE}${O}${REFSUFFIX}"
         echo "      where : $LOC"
         [ -n "$DET" ] && echo "      detail: $DET"
+        [ "$CLASS" = "mutated" ] && echo "      ${R}note  : content changed since this was pinned reviewed-benign — re-review before re-pinning.${O}"
       done
   done
 }
-
-ORDER='{"critical":0,"high":1,"medium":2,"low":3,"unknown":4}'
 
 echo "${B}honey scan report${O}  ${D}($WHEN)${O}"
 echo "host: $HOST   scanned: $ROOT   files: $FILES   scanner: $VER"
@@ -102,38 +146,69 @@ case "$STATUS" in
     echo "Diagnostics:"; tail -n 5 "$RUN_DIR/diagnostics.ndjson" 2>/dev/null | sed 's/^/  /'
     echo "Full log: $RUN_DIR/update.log" ;;
   exposed)
-    BY_SEV="$(j '.findings_by_severity | to_entries | map("\(.value) \(.key)") | join(", ")')"
-    echo "${R}🚨 bumblebee: EXPOSED${O} — $TOTAL match(es): $BY_SEV"
-    echo
-    jq -rs --argjson ord "$ORDER" '
-      sort_by($ord[.severity] // 9)[] |
-      [.severity,.package_name,.version,.ecosystem,.catalog_name,.source_file,.confidence,.catalog_id]
-      | @tsv' "$FINDINGS" 2>/dev/null | while IFS=$'\t' read -r SEV PKG VER_ ECO CAT SRC CONF CID; do
-      case "$SEV" in critical|high) C="$R";; medium) C="$Y";; *) C="$D";; esac
-      SEV_UC="$(printf '%s' "$SEV" | tr '[:lower:]' '[:upper:]')"  # portable: macOS bash 3.2, no ${x^^}
-      echo "  ${C}● ${SEV_UC}${O}  ${B}$PKG${O} $VER_  ${D}($ECO)${O}"
-      echo "      campaign  : $CAT"
-      echo "      where     : $SRC"
-      case "$CONF" in
-        high)   echo "      confidence: high — exact installed version present";;
-        medium) echo "      confidence: medium — identity reliable, version/source partial";;
-        low)    echo "      confidence: low — config/spec reference, not proof of an installed build";;
-        *)      echo "      confidence: $CONF";;
-      esac
-      echo "      fix       : $(remediation "$ECO" "$PKG" "$VER_")"
-      echo "      source    : catalog entry $CID in $CATDIR"
-    done ;;
+    # Classify bumblebee matches against the baseline (pinning a known-
+    # compromised match is opt-in and rare, but honored uniformly).
+    BCLS="$(honey_classify_bumblebee "$FINDINGS")"
+    bs="$(printf '%s\n' "$BCLS" | jq -r 'select(._class=="suppressed")|1' 2>/dev/null | grep -c .)"
+    bm="$(printf '%s\n' "$BCLS" | jq -r 'select(._class=="mutated")|1'    2>/dev/null | grep -c .)"
+    be="$(printf '%s\n' "$BCLS" | jq -r 'select(._class=="expired")|1'    2>/dev/null | grep -c .)"
+    ba="$(printf '%s\n' "$BCLS" | jq -r 'select(._class!="suppressed")|1' 2>/dev/null | grep -c .)"
+    SUP=$((SUP+bs)); MUT=$((MUT+bm)); EXP=$((EXP+be))
+    if [ "$ba" -eq 0 ]; then
+      echo "${G}✓ bumblebee: CLEAN${O} — all $TOTAL match(es) suppressed by baseline (review with ./honey-baseline.sh)."
+    else
+      [ "$(rank exposed)" -gt "$(rank "$OVERALL")" ] && OVERALL="exposed"
+      BY_SEV="$(printf '%s\n' "$BCLS" | jq -rs 'map(select(._class!="suppressed")) | group_by(.severity) | map("\(length) \(.[0].severity)") | join(", ")')"
+      SUPN=""; [ "$bs" -gt 0 ] && SUPN="  ${D}(+${bs} suppressed)${O}"
+      echo "${R}🚨 bumblebee: EXPOSED${O} — $ba match(es): $BY_SEV${SUPN}"
+      echo
+      printf '%s\n' "$BCLS" | jq -rs --argjson ord "$ORDER" '
+        map(select(._class!="suppressed")) | sort_by($ord[.severity] // 9)[] |
+        [.severity,.package_name,.version,.ecosystem,.catalog_name,.source_file,.confidence,.catalog_id,._class]
+        | @tsv' 2>/dev/null | while IFS=$'\t' read -r SEV PKG VER_ ECO CAT SRC CONF CID CLASS; do
+        case "$SEV" in critical|high) C="$R";; medium) C="$Y";; *) C="$D";; esac
+        SEV_UC="$(printf '%s' "$SEV" | tr '[:lower:]' '[:upper:]')"  # portable: macOS bash 3.2, no ${x^^}
+        echo "  $(class_prefix "$CLASS")${C}● ${SEV_UC}${O}  ${B}$PKG${O} $VER_  ${D}($ECO)${O}"
+        echo "      campaign  : $CAT"
+        echo "      where     : $SRC"
+        case "$CONF" in
+          high)   echo "      confidence: high — exact installed version present";;
+          medium) echo "      confidence: medium — identity reliable, version/source partial";;
+          low)    echo "      confidence: low — config/spec reference, not proof of an installed build";;
+          *)      echo "      confidence: $CONF";;
+        esac
+        echo "      fix       : $(remediation "$ECO" "$PKG" "$VER_")"
+        echo "      source    : catalog entry $CID in $CATDIR"
+        [ "$CLASS" = "mutated" ] && echo "      ${R}note      : content changed since this was pinned reviewed-benign — re-review before re-pinning.${O}"
+      done
+    fi ;;
 esac
 
 # --- additional lenses ------------------------------------------------------
 render_lenses
 
+# --- suppression summary ----------------------------------------------------
+if [ $((SUP+MUT+EXP)) -gt 0 ]; then
+  echo
+  echo "${D}baseline: ${SUP} suppressed, ${MUT} mutated, ${EXP} expired — honey.baseline.json. Review: ./honey-baseline.sh status${O}"
+  [ "$MUT" -gt 0 ] && echo "${R}⚠ ${MUT} MUTATED: a file pinned as reviewed-benign has CHANGED. Treat as a possible rug pull and re-review.${O}"
+fi
+
 # --- overall verdict --------------------------------------------------------
+# Suffix tallies so a suppressed run can never read as a bare all-clear.
+SUFFIX=""
+if [ $((SUP+MUT+EXP)) -gt 0 ]; then
+  SUFFIX=" (${SUP} suppressed"
+  [ "$MUT" -gt 0 ] && SUFFIX="${SUFFIX}, ${MUT} mutated"
+  [ "$EXP" -gt 0 ] && SUFFIX="${SUFFIX}, ${EXP} expired"
+  SUFFIX="${SUFFIX})"
+fi
+
 echo
 if [ "$OVERALL" = "clean" ]; then
-  echo "${G}OVERALL: CLEAN${O} across bumblebee and all active lenses."
+  echo "${G}OVERALL: CLEAN${O}${SUFFIX} across bumblebee and all active lenses."
   exit 0
 fi
-echo "${B}OVERALL: $(printf '%s' "$OVERALL" | tr '[:lower:]' '[:upper:]')${O} — address critical/high + high-confidence items first."
+echo "${B}OVERALL: $(printf '%s' "$OVERALL" | tr '[:lower:]' '[:upper:]')${O}${SUFFIX} — address critical/high + high-confidence items first."
 echo "Verify each fix manually; honey only reports, it never changes your system. Raw records under: $RUN_DIR"
 exit 1

@@ -21,6 +21,14 @@ exactly matches a known-compromised entry in a threat-intelligence catalog.
    agent skills); the OVERALL verdict is the worst across all of them. Surface
    every scanner's findings, not just bumblebee's.
 
+   The OVERALL line may carry a suppression tally, e.g. `CLEAN (12 suppressed)`
+   or `EXPOSED — … (12 suppressed, 2 mutated)`. `suppressed` = findings the user
+   pinned as reviewed-benign in `honey.baseline.json` (dropped from the verdict —
+   don't re-alarm). `mutated` (🔁 in the report) = a pinned file CHANGED since
+   review — treat as high signal (possible rug pull), surface it, and never call
+   such a run clean. Manage pins with `./honey-baseline.sh` (see
+   [`docs/BASELINE.plan.md`](docs/BASELINE.plan.md)).
+
 2. For detail beyond the report, read the run dir:
    - `manifest.json`   — bumblebee verdict, counts, metadata.
    - `findings.ndjson` — bumblebee findings, one per line.
