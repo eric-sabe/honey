@@ -24,6 +24,12 @@ FINDINGS="$RUN_DIR/findings.ndjson"
 
 [ -f "$MANIFEST" ] || { echo "report: no manifest at $MANIFEST" >&2; exit 1; }
 
+# Load honey.conf so persisted settings (verdict floor, trusted patterns,
+# HONEY_BASELINE) apply when report.sh is run standalone — the Claude routine
+# invokes it as a separate process from daily-cycle.sh, so it can't rely on an
+# inherited environment. env var > honey.conf > built-in default.
+# shellcheck source=lib/load-config.sh
+. "$HONEY/lib/load-config.sh"
 # shellcheck source=lib/baseline.sh
 . "$HONEY/lib/baseline.sh"
 
