@@ -76,8 +76,16 @@ foreach ($skill in $skills) {
     $data = $null
     try { $data = Get-Content -LiteralPath $raw -Raw | ConvertFrom-Json } catch { $data = $null }
     if ($null -eq $data) { Add-Content -LiteralPath $errLog -Value "no valid JSON for: $skill"; $errors++; continue }
+    # Schema guard: honey normalizes the `issues[]` array. If a future SkillSpector
+    # renames/drops it, iterating a missing property yields ZERO findings — a false
+    # "clean". Treat valid-JSON-without-`issues` as schema-drift ERROR (surfaces as
+    # scan_error), never a silent all-clear.
+    if ($data.PSObject.Properties.Name -notcontains 'issues') {
+        Add-Content -LiteralPath $errLog -Value "SCHEMA DRIFT: SkillSpector output for $skill has no top-level .issues (output format changed? re-verify the lens normalizer)"
+        $errors++; continue
+    }
 
-    foreach ($issue in @(if ($data.PSObject.Properties.Name -contains 'issues') { $data.issues } else { @() })) {
+    foreach ($issue in @($data.issues)) {
         $id      = if ($issue.PSObject.Properties.Name -contains 'id' -and $issue.id) { $issue.id } else { '' }
         $pattern = if ($issue.PSObject.Properties.Name -contains 'pattern' -and $issue.pattern) { $issue.pattern } else { '' }
         $title   = (($id + ' ' + $pattern).Trim())
