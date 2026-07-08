@@ -85,8 +85,17 @@ for skill in "${skills[@]}"; do
     echo "scan produced no valid JSON for: $skill" >>"$work/errors.log"
     errors=$((errors+1)); continue
   fi
-  # Normalize v2.0.0 `issues[]` into honey's finding shape (schema verified
-  # against SkillSpector v2.0.0 --format json output).
+  # Schema guard: honey normalizes the `issues[]` array. If a future SkillSpector
+  # renames/drops it, `(.issues // [])` would silently yield ZERO findings — a
+  # false "clean". Treat valid-JSON-without-`issues` as a schema-drift ERROR so
+  # it surfaces as scan_error (visible), never a silent all-clear.
+  if ! jq -e 'has("issues")' "$raw" >/dev/null 2>&1; then
+    echo "SCHEMA DRIFT: SkillSpector output for $skill has no top-level .issues (output format changed? re-verify the lens normalizer)" >>"$work/errors.log"
+    errors=$((errors+1)); continue
+  fi
+  # Normalize `issues[]` into honey's finding shape. Schema verified against
+  # SkillSpector v2.0.0 and v2.3.11 --format json output (issues[] is the tool's
+  # documented "core contract": id/pattern/severity/category/location).
   norm="$(jq --arg skill "$skill" '
     (.issues // []) | map({
       severity: ((.severity // "unknown") | ascii_downcase),
