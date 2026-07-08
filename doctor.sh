@@ -64,6 +64,34 @@ if [ -d "$HONEY/lenses" ] && ls "$HONEY"/lenses/*.sh >/dev/null 2>&1; then
       mcp)
         # honey-native lens (jq only) — MCP manifest inventory + rug-pull diffing.
         ok "lens $lname active (native; MCP manifest hash-and-diff, jq only)" ;;
+      ocr)
+        # honey-native multimodal lens; needs tesseract for image OCR.
+        if command -v tesseract >/dev/null 2>&1; then
+          ok "lens $lname active (native; image-payload OCR via tesseract $(tesseract --version 2>&1 | head -1 | awk '{print $2}'))"
+        else
+          bad "lens $lname inactive — tesseract not installed (optional)"
+          hint "image-payload (SkillCamo) detection; macOS: brew install tesseract · Debian/Ubuntu: apt-get install tesseract-ocr"
+        fi ;;
+      mcp-scan)
+        # opt-in external lens (cloud/phones home).
+        if [ "${HONEY_ENABLE_MCP_SCAN:-0}" != "1" ]; then
+          ok "lens $lname opt-in (disabled) — set HONEY_ENABLE_MCP_SCAN=1 to enable (note: cloud/phones home)"
+        elif command -v mcp-scan >/dev/null 2>&1; then
+          ok "lens $lname active (enabled; mcp-scan present)"
+        else
+          bad "lens $lname enabled but mcp-scan not installed"
+          hint "Invariant/Snyk Agent Scan: pip install mcp-scan (https://github.com/snyk/agent-scan)"
+        fi ;;
+      garak)
+        # opt-in external lens (probes a live model).
+        if [ "${HONEY_ENABLE_GARAK:-0}" != "1" ]; then
+          ok "lens $lname opt-in (disabled) — set HONEY_ENABLE_GARAK=1 + HONEY_GARAK_TARGET (note: probes a live model)"
+        elif command -v garak >/dev/null 2>&1; then
+          ok "lens $lname active (enabled; garak present)"
+        else
+          bad "lens $lname enabled but garak not installed"
+          hint "NVIDIA garak: pip install garak (https://github.com/NVIDIA/garak)"
+        fi ;;
       *)
         if command -v "$lname" >/dev/null 2>&1; then ok "lens $lname active"; else bad "lens $lname inactive (optional tool '$lname' not installed)"; fi ;;
     esac

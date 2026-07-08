@@ -78,6 +78,16 @@ foreach ($t in $lensTools.Keys) {
 # honey-native lenses: no external tool — always on.
 Ok "lens smuggle active (native; invisible-Unicode/bidi + remote-include detection)"
 Ok "lens mcp active (native; MCP manifest hash-and-diff for rug pulls)"
+# ocr: native multimodal lens, needs tesseract.
+if (Get-Command tesseract -ErrorAction SilentlyContinue) { Ok "lens ocr active (native; image-payload OCR via tesseract)" }
+else { Write-HoneyConsole "  [ ] lens ocr inactive - tesseract not installed (optional)"; Hint "image-payload (SkillCamo) detection; winget install UB-Mannheim.TesseractOCR" }
+# opt-in external lenses.
+if ((Get-HoneySetting 'HONEY_ENABLE_MCP_SCAN' '0') -ne '1') { Ok "lens mcp-scan opt-in (disabled) - set HONEY_ENABLE_MCP_SCAN=1 (note: cloud/phones home)" }
+elseif (Get-Command mcp-scan -ErrorAction SilentlyContinue) { Ok "lens mcp-scan active (enabled; mcp-scan present)" }
+else { Bad "lens mcp-scan enabled but mcp-scan not installed"; Hint "pip install mcp-scan (https://github.com/snyk/agent-scan)" }
+if ((Get-HoneySetting 'HONEY_ENABLE_GARAK' '0') -ne '1') { Ok "lens garak opt-in (disabled) - set HONEY_ENABLE_GARAK=1 + HONEY_GARAK_TARGET (note: probes a live model)" }
+elseif (Get-Command garak -ErrorAction SilentlyContinue) { Ok "lens garak active (enabled; garak present)" }
+else { Bad "lens garak enabled but garak not installed"; Hint "pip install garak (https://github.com/NVIDIA/garak)" }
 
 # Suppression baseline (informational; never affects pass/fail).
 Write-HoneyConsole ""

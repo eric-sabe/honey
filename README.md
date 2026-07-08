@@ -107,11 +107,23 @@ Every lens is **opt-in**: honey never installs a lens's tool for you, and an
 uninstalled lens is fully inert. Install the tool, and the lens activates on
 the next run. `./doctor.sh` shows which lenses are active.
 
+**Offline vs. external.** The first six lenses run **offline** — nothing leaves
+your machine (`bumblebee`, `smuggle`, `mcp`, and `ocr` are honey-native or use a
+local tool; `osv-scanner`/`govulncheck` do static DB lookups). The last two are
+**external and off by default**: `mcp-scan` calls a cloud API, and `garak`
+probes a live model — so both stay inert unless you *explicitly* enable them
+(`HONEY_ENABLE_MCP_SCAN=1` / `HONEY_ENABLE_GARAK=1`) and they never run in the
+default cycle. honey's native `mcp` lens covers the MCP surface without the
+cloud call.
+
 | Lens | Tool | Covers | Install |
 |---|---|---|---|
 | `skillspector` | [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) | AI agent skills (`SKILL.md` + scripts): prompt injection, data exfil, excessive agency, tool poisoning | per its README (Python 3.12+) |
 | `smuggle` | honey-native | **Scanner-evasion** in agent-skill/instruction files: invisible-Unicode (tag chars), bidi overrides (Trojan Source), zero-width chars, and remote-include instructions — the tricks static pattern scanners miss | none (uses `perl`; PowerShell uses native .NET) |
 | `mcp` | honey-native | **MCP servers** (`.mcp.json` + host configs — invisible to skillspector): inventories every server and **hash-diffs its definition across runs to catch rug pulls** (a server that changes after you approve it); flags fetch-and-exec launch commands | none (jq / native .NET) |
+| `ocr` | honey-native | **Image-payload / SkillCamo**: OCRs images bundled in skills and flags hidden instructions — the multimodal blind spot text scanners can't see | [tesseract](https://github.com/tesseract-ocr/tesseract) (`brew install tesseract`) |
+| `mcp-scan` | [Invariant / Snyk Agent Scan](https://github.com/snyk/agent-scan) | Hybrid rules+model analysis of MCP servers & skills (tool poisoning/shadowing, toxic flows) — **opt-in; cloud** | `pip install mcp-scan`; enable with `HONEY_ENABLE_MCP_SCAN=1` |
+| `garak` | [NVIDIA garak](https://github.com/NVIDIA/garak) | Probes a **live model** for jailbreaks/injection/leakage — **opt-in; not offline** | `pip install garak`; enable with `HONEY_ENABLE_GARAK=1` + a target |
 | `osv-scanner` | [Google/OSV osv-scanner](https://github.com/google/osv-scanner) | Known vulns in lockfiles/manifests across **all** ecosystems (npm, pypi, cargo, go, …) | `go install github.com/google/osv-scanner/cmd/osv-scanner@latest` |
 | `govulncheck` | [Go vuln team govulncheck](https://golang.org/x/vuln) | Go vulns that your code **actually calls** (reachability-aware → far less noise) | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
 
@@ -375,6 +387,9 @@ one-off run. You can also hand-edit `honey.conf` — one `export VAR=…` per li
 | `HONEY_SMUGGLE_EXCLUDE` | `node_modules`/`.git`/`vendor`/`.pnpm` | smuggle lens: skip files whose path matches (ERE) |
 | `HONEY_MCP_CONFIGS` | Claude/Cursor/VS Code/Windsurf host configs | mcp lens: colon-separated MCP config files to inventory (plus every `.mcp.json` under the project roots) |
 | `HONEY_MCP_STATE` | `<repo>/.mcp-state.json` | mcp lens: where the per-run manifest hashes are stored for rug-pull diffing (gitignored) |
+| `HONEY_OCR_MAX` | `300` | ocr lens: cap on images OCR-scanned per run |
+| `HONEY_ENABLE_MCP_SCAN` | `0` | set `1` to enable the opt-in `mcp-scan` lens (**cloud/phones home**; also needs `SNYK_TOKEN`/`OPENAI_API_KEY`) |
+| `HONEY_ENABLE_GARAK` | `0` | set `1` to enable the opt-in `garak` lens (**probes a live model**; also needs `HONEY_GARAK_TARGET`) |
 | `HONEY_UPDATE_LENSES` | `1` | `go install @latest` the Go lens binaries (osv-scanner, govulncheck) before scanning; `0` to skip |
 | `HONEY_OSV_OFFLINE` | `0` | osv-scanner: use local vuln DBs instead of OSV.dev |
 | `HONEY_OSV_INCLUDE_GO_STDLIB` | `0` | osv-scanner: keep Go stdlib advisories (default defers them to govulncheck) |
