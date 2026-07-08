@@ -53,6 +53,14 @@ if [ -d "$HONEY/lenses" ] && ls "$HONEY"/lenses/*.sh >/dev/null 2>&1; then
           bad "lens $lname inactive — govulncheck not installed (optional)"
           hint "Go reachability-aware vuln scanning; install: go install golang.org/x/vuln/cmd/govulncheck@latest"
         fi ;;
+      smuggle)
+        # honey-native lens (no external tool); needs perl for Unicode scanning.
+        if command -v perl >/dev/null 2>&1; then
+          ok "lens $lname active (native; perl $(perl -e 'print substr($^V,1)' 2>/dev/null))"
+        else
+          bad "lens $lname inactive — perl not found (optional)"
+          hint "invisible-Unicode/bidi + remote-include detection; install perl to enable (ships on macOS + most Linux)"
+        fi ;;
       *)
         if command -v "$lname" >/dev/null 2>&1; then ok "lens $lname active"; else bad "lens $lname inactive (optional tool '$lname' not installed)"; fi ;;
     esac
