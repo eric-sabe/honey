@@ -15,6 +15,17 @@ honey doesn't detect anything itself — it **orchestrates** scanners, each a
 | osv-scanner | "Do my dependencies have known CVEs?" (all ecosystems) | [Google/OSV](https://github.com/google/osv-scanner) |
 | govulncheck | "Do I actually *call* a vulnerable Go function?" | [Go team](https://golang.org/x/vuln) |
 | skillspector | "Is an installed AI agent skill behaving maliciously?" | [NVIDIA](https://github.com/NVIDIA/skillspector) |
+| smuggle | "Is something *hidden* from the scanners — invisible Unicode, a bidi trick, a remote include?" | honey-native |
+| mcp | "Did an MCP server's definition change since I approved it?" (rug pulls) | honey-native |
+| ocr | "Are there instructions *hidden in an image* bundled with a skill?" | honey-native |
+
+Two further lenses — `mcp-scan` (cloud) and `garak` (live-model probing) — are
+**off by default** and wrap external tools; see [Lenses](#lenses--additional-scanners-optional).
+On top of the raw scanners, honey adds a
+[suppression baseline](#suppression-baseline-pin-and-diff) (acknowledge a
+reviewed finding once, get told if it later changes) and a
+[verdict policy](#verdict-policy-provenance--severity-floor) (tune what
+escalates the daily alarm).
 
 bumblebee (the only required scanner) is a read-only inventory collector that
 flags on-disk package/extension/version metadata matching a known-compromised
@@ -38,8 +49,14 @@ Use honey three ways, smallest footprint first:
 ```sh
 git clone https://github.com/<you>/honey && cd honey
 ./setup.sh        # clones bumblebee, installs the binary + Go vuln lenses, verifies
-./daily-cycle.sh  # run a scan; read runs/latest/manifest.json for the verdict
+./daily-cycle.sh  # run a full scan (bumblebee + every active lens)
+./report.sh       # the verdict — read the OVERALL line (worst across all scanners)
 ```
+
+> The verdict is `report.sh`'s **`OVERALL:`** line, not `manifest.json` —
+> that file is bumblebee *alone* and reads `clean` even when a lens found
+> something. `daily-cycle.sh`'s exit code (`0` clean / `1` needs attention)
+> reflects the same worst-wins verdict.
 
 `setup.sh` is idempotent and ends by running `./doctor.sh`, which prints a
 ✓/✗ line for every dependency with exact fix-it commands for anything
@@ -72,18 +89,26 @@ lenses are active and how to enable inactive ones.
 
 ## How a scan cycle works
 
+`daily-cycle.sh` runs one cycle: **bumblebee first, then every active lens**,
+folded into one worst-wins verdict.
+
 1. `git pull --ff-only` the bumblebee checkout — fresh `threat_intel/`
    catalogs (they're updated upstream via PR).
 2. `go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest` — fresh
    binary.
 3. `bumblebee scan --profile deep --root $HOME --exposure-catalog <repo>/threat_intel
    --findings-only` → writes a timestamped run dir + `manifest.json`.
-4. `daily-cycle.sh` exits `0` when `status` is `clean`, `1` otherwise — so a
-   scheduler or routine can branch on it.
+4. Each active [lens](#lenses--additional-scanners-optional) runs and writes its
+   own `lens-<name>.json` into the same run dir.
+5. `daily-cycle.sh` exits `0` only when the **overall** verdict (worst across
+   bumblebee + every lens, after the baseline and verdict policy) is clean, `1`
+   otherwise — so a scheduler or routine can branch on it.
 
 A clean machine produces no findings — that's the "all clear". Results live
 **outside** the bumblebee checkout and `~/go`, so neither the `git pull` nor
-the `go install` can delete them.
+the `go install` can delete them. The `manifest.json` `status` values below
+describe **bumblebee's** result specifically; a lens can still escalate the
+overall verdict even when bumblebee is `clean`.
 
 ### manifest `status` values
 
@@ -107,14 +132,21 @@ Every lens is **opt-in**: honey never installs a lens's tool for you, and an
 uninstalled lens is fully inert. Install the tool, and the lens activates on
 the next run. `./doctor.sh` shows which lenses are active.
 
-**Offline vs. external.** The first six lenses run **offline** — nothing leaves
-your machine (`bumblebee`, `smuggle`, `mcp`, and `ocr` are honey-native or use a
-local tool; `osv-scanner`/`govulncheck` do static DB lookups). The last two are
-**external and off by default**: `mcp-scan` calls a cloud API, and `garak`
-probes a live model — so both stay inert unless you *explicitly* enable them
-(`HONEY_ENABLE_MCP_SCAN=1` / `HONEY_ENABLE_GARAK=1`) and they never run in the
-default cycle. honey's native `mcp` lens covers the MCP surface without the
-cloud call.
+**What runs, and what phones out.** Install a lens's tool and it activates on
+the next run — *except two*, which never join the default cycle unless you set
+an explicit flag, because they send data off your machine:
+
+- `mcp-scan` calls a **cloud API** (and shares tool names/descriptions with the
+  vendor) — enable with `HONEY_ENABLE_MCP_SCAN=1`. honey's native `mcp` lens
+  covers the same surface without the cloud call.
+- `garak` **probes a live model** over the network — enable with
+  `HONEY_ENABLE_GARAK=1` plus a target.
+
+Everything else runs **locally**, with one nuance worth stating plainly:
+`osv-scanner` and `govulncheck` look up **public** vulnerability databases
+(OSV.dev, vuln.go.dev) by package *coordinates* — your code and file contents
+never leave the machine, and `HONEY_OSV_OFFLINE=1` switches to local DBs.
+`bumblebee`, `skillspector`, `smuggle`, `mcp`, and `ocr` touch no network at all.
 
 | Lens | Tool | Covers | Install |
 |---|---|---|---|
@@ -127,19 +159,20 @@ cloud call.
 | `osv-scanner` | [Google/OSV osv-scanner](https://github.com/google/osv-scanner) | Known vulns in lockfiles/manifests across **all** ecosystems (npm, pypi, cargo, go, …) | `go install github.com/google/osv-scanner/cmd/osv-scanner@latest` |
 | `govulncheck` | [Go vuln team govulncheck](https://golang.org/x/vuln) | Go vulns that your code **actually calls** (reachability-aware → far less noise) | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
 
-**What each answers.** bumblebee: *"do I have a known-compromised package?"*
-(exact catalog match). skillspector: *"is this agent skill behaving
-maliciously?"* (content analysis). smuggle: *"is something hidden from the
-scanners — invisible Unicode, a bidi trick, a remote include?"* (evasion). mcp:
-*"did an MCP server's definition change since I approved it?"* (rug-pull
-diffing). osv-scanner: *"do my dependencies have known CVEs?"* (broad).
-govulncheck: *"do I actually reach a vulnerable Go function?"* (deep, low-noise).
-Together they cover reactive, proactive, breadth, depth, anti-evasion, and drift.
+**How they complement each other.** bumblebee matches *known-compromised*
+packages (reactive, exact). osv-scanner/govulncheck cover *known CVEs* — broad
+across ecosystems, then deep and reachability-aware for Go. skillspector reads
+agent-skill *content* for malicious behavior; smuggle catches what's *hidden*
+from that content scan (invisible Unicode, bidi, remote includes); ocr catches
+instructions hidden in *images*; and mcp watches MCP manifests for *change*
+(rug pulls). Reactive, proactive, breadth, depth, anti-evasion, and drift — one
+verdict.
 
 **Where the vuln lenses scan.** osv-scanner and govulncheck scan your *project*
 directories, not all of `$HOME`. Set `HONEY_PROJECT_ROOTS` (colon-separated;
-default `~/git:~/code:~/Developer:~/src`) to control this. The skillspector
-lens scans skill dirs under `~/.claude` (override with `HONEY_SKILL_ROOTS`).
+default `~/git:~/code:~/Developer:~/src`) to control this. The agent-skill
+lenses (skillspector, smuggle, ocr) scan skill dirs under `~/.claude` (override
+with `HONEY_SKILL_ROOTS`).
 
 **Declared deps, not vendored copies.** osv-scanner walks into `node_modules`,
 `vendor/`, `.pnpm`, and every nested `.claude/worktrees/*` — flagging the same
@@ -383,7 +416,7 @@ one-off run. You can also hand-edit `honey.conf` — one `export VAR=…` per li
 | `BUMBLEBEE_SCAN_ROOT` | `$HOME` | what bumblebee scans |
 | `BUMBLEBEE_MAX_DURATION` | `30m` | bumblebee scan time cap |
 | `HONEY_PROJECT_ROOTS` | `~/git:~/code:~/Developer:~/src` | where the vuln lenses (osv-scanner, govulncheck) look for projects |
-| `HONEY_SKILL_ROOTS` | skill dirs under `~/.claude` | where the skillspector and smuggle lenses look for agent skills |
+| `HONEY_SKILL_ROOTS` | skill dirs under `~/.claude` | where the agent-skill lenses (skillspector, smuggle, ocr) look for skills |
 | `HONEY_SMUGGLE_EXCLUDE` | `node_modules`/`.git`/`vendor`/`.pnpm` | smuggle lens: skip files whose path matches (ERE) |
 | `HONEY_MCP_CONFIGS` | Claude/Cursor/VS Code/Windsurf host configs | mcp lens: colon-separated MCP config files to inventory (plus every `.mcp.json` under the project roots) |
 | `HONEY_MCP_STATE` | `<repo>/.mcp-state.json` | mcp lens: where the per-run manifest hashes are stored for rug-pull diffing (gitignored) |
@@ -416,11 +449,18 @@ honey/
 ├── honey.baseline.json # the suppression baseline (committed & reviewable; NOT gitignored)
 ├── install-schedule.sh # schedule notify-cycle via launchd (macOS) / cron (Linux)
 ├── lib/baseline.sh   # shared suppression classifier (sourced by report/daily-cycle/CLI)
+├── lib/verdict.sh    # provenance tier + severity floor (sourced by lib/baseline.sh)
 ├── lenses/           # optional additional scanners, each self-skips if its tool is absent
 │   ├── skillspector.sh  # AI agent skills (NVIDIA SkillSpector)
+│   ├── smuggle.sh       # invisible-Unicode/bidi + remote-include evasion (honey-native)
+│   ├── mcp.sh           # MCP manifest inventory + rug-pull diffing (honey-native)
+│   ├── ocr.sh           # image-payload / SkillCamo detection (honey-native, tesseract)
+│   ├── mcp-scan.sh      # Invariant/Snyk Agent Scan wrapper (opt-in, cloud)
+│   ├── garak.sh         # NVIDIA garak live-model probing (opt-in)
 │   ├── osv-scanner.sh   # multi-ecosystem lockfile vulns (Google/OSV)
 │   └── govulncheck.sh   # Go reachability-aware vulns (Go vuln team)
 ├── docs/BASELINE.plan.md # suppression baseline design + threat model
+├── docs/VERDICT.plan.md  # verdict policy (provenance + severity floor) design
 ├── routine-prompt.md # prompt for the Claude Local routine (scheduled path)
 ├── triage-guide.md   # guide for triaging a run by hand in a chat
 ├── win/              # native Windows (PowerShell 7) port — mirrors every script above
