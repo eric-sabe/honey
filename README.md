@@ -217,6 +217,32 @@ first place — sleeper/trigger-activated code, instructions fetched from a remo
 URL at runtime, or content hidden in bundled images. The baseline can only
 suppress what a lens surfaced; widening the scanned surface is separate work.
 
+## Verdict policy (provenance + severity floor)
+
+Where the baseline pins *specific* findings, the verdict policy is the *broad*
+dial for the daily marketplace noise. Two settings, applied after suppression
+([`docs/VERDICT.plan.md`](docs/VERDICT.plan.md)):
+
+- **Provenance** — a finding whose location matches `HONEY_TRUSTED_PATTERNS`
+  (default `claude-plugins-official`) is tagged **first-party**; the report shows
+  a `[1st-party]` marker.
+- **Severity floor** — a finding escalates `OVERALL` only at/above the floor for
+  its provenance (`HONEY_VERDICT_FLOOR` for third-party, `HONEY_VERDICT_FLOOR_TRUSTED`
+  for first-party). Below-floor findings move to a **review tier**: still
+  printed and counted (`OVERALL: … (65 review)`), but non-blocking.
+
+```bash
+# Demote first-party low/medium noise to the review tier (high/critical still block):
+export HONEY_VERDICT_FLOOR_TRUSTED=high
+# Or, for a marketplace you fully trust, demote all of its non-critical findings:
+export HONEY_VERDICT_FLOOR_TRUSTED=critical
+```
+
+**Safe by default:** floors default to `none` — every finding blocks, exactly as
+before. Provenance labeling is on (informational). **bumblebee always blocks**
+(known-compromised catalog), and a **MUTATED** pin always blocks (rug-pull
+tripwire) — the floor is a lens-noise dial, never a mute for genuine danger.
+
 ## Optional: daily Slack triage via a Claude Local routine
 
 If you use [Claude Code](https://claude.com/claude-code) and have the Slack
@@ -348,6 +374,9 @@ one-off run. You can also hand-edit `honey.conf` — one `export VAR=…` per li
 | `HONEY_OSV_NO_DEDUPE` | `0` | osv-scanner: `1` keeps one finding per path; default collapses identical `package@version`+advisory across paths into one (`+N more`) |
 | `HONEY_SKILLSPECTOR_LLM` | `0` | skillspector: enable its own LLM stage (default static `--no-llm`) |
 | `HONEY_BASELINE` | `<repo>/honey.baseline.json` | path to the suppression baseline (pin-and-diff); see [Suppression baseline](#suppression-baseline-pin-and-diff) |
+| `HONEY_TRUSTED_PATTERNS` | `claude-plugins-official` | ERE; a finding whose location matches is **first-party** (else third-party). Empty ⇒ nothing trusted. See [Verdict policy](#verdict-policy-provenance--severity-floor) |
+| `HONEY_VERDICT_FLOOR` | `none` | min severity (`none\|low\|medium\|high\|critical`) at which a **third-party** finding escalates OVERALL; below it → non-blocking "review" tier (still reported) |
+| `HONEY_VERDICT_FLOOR_TRUSTED` | = `HONEY_VERDICT_FLOOR` | same, for **first-party** findings. Set `high` (or `critical`) to demote trusted-marketplace low/medium noise to review |
 
 ## Layout
 

@@ -14,6 +14,11 @@
 # Portability: pure bash 3.2 + jq. No associative arrays, no ${x^^}. Occurrence
 # indices and path tildify are done in jq (deterministic), not in shell.
 
+# Verdict policy (provenance tier + severity floor). Sourced here so every
+# classified finding also carries _provenance and _blocking.
+# shellcheck source=lib/verdict.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/verdict.sh"
+
 # --- config -----------------------------------------------------------------
 
 # Absolute path to the baseline file. Override with HONEY_BASELINE.
@@ -123,17 +128,25 @@ _honey_classify() {
       ) | .out[]' 2>/dev/null \
   | while IFS= read -r finding; do
       [ -n "$finding" ] || continue
-      local rule loc idx locfile absfile curhash entry expires csource cmp class reason
+      local rule loc idx sev prov blk locfile absfile curhash entry expires csource cmp class reason
       rule="$(printf '%s' "$finding" | jq -r '.rule // ""')"
       loc="$(printf '%s' "$finding" | jq -r '._loc // ""')"
       idx="$(printf '%s' "$finding" | jq -r '._index // 0')"
+      # Verdict policy: provenance (from location) + blocking (severity vs floor).
+      sev="$(printf '%s' "$finding" | jq -r '.severity // "unknown"')"
+      prov="$(honey_provenance "$loc")"
+      blk="$(honey_is_blocking "$sev" "$prov")"
+      # bumblebee is the known-compromised catalog scanner — its matches always
+      # block; the severity floor is a lens-noise dial, not a way to mute a
+      # known-bad package.
+      [ "$scanner" = "bumblebee" ] && blk="yes"
 
       entry="$(printf '%s' "$entries" | jq -c --arg s "$scanner" --arg r "$rule" \
                  --arg l "$loc" --argjson i "$idx" \
                  'map(select(.scanner==$s and .rule==$r and .location==$l and ((.index // 0)==$i))) | .[0] // empty' 2>/dev/null)"
 
       if [ -z "$entry" ]; then
-        printf '%s' "$finding" | jq -c '. + {_class:"active",_reason:""}'
+        printf '%s' "$finding" | jq -c --arg pv "$prov" --arg bk "$blk" '. + {_class:"active",_reason:"",_provenance:$pv,_blocking:$bk}'
         continue
       fi
 
@@ -162,7 +175,10 @@ _honey_classify() {
         # Content changed since review (or file gone): the tripwire. Resurface.
         class="mutated"
       fi
-      printf '%s' "$finding" | jq -c --arg c "$class" --arg r "$reason" '. + {_class:$c,_reason:$r}'
+      # A MUTATED pin is the rug-pull tripwire — it always blocks, floor be damned.
+      [ "$class" = "mutated" ] && blk="yes"
+      printf '%s' "$finding" | jq -c --arg c "$class" --arg r "$reason" --arg pv "$prov" --arg bk "$blk" \
+        '. + {_class:$c,_reason:$r,_provenance:$pv,_blocking:$bk}'
     done
 }
 
@@ -211,21 +227,24 @@ honey_classify_run() {
 baseline_effective_overall() {
   local run_dir="$1"
   local manifest="$run_dir/manifest.json"
-  local sup=0 mut=0 exp=0 overall="clean"
+  local sup=0 mut=0 exp=0 rev=0 overall="clean"
   _rank() { case "$1" in scan_error) echo 4;; exposed) echo 3;; incomplete) echo 2;; clean|skipped) echo 1;; *) echo 0;; esac; }
   _worse() { [ "$(_rank "$2")" -gt "$(_rank "$1")" ] && printf '%s' "$2" || printf '%s' "$1"; }
   _cnt() { printf '%s\n' "$1" | jq -r "select(._class==\"$2\")|._class" 2>/dev/null | grep -c . ; }
+  # Active + blocking findings escalate OVERALL; active + non-blocking are the
+  # "review" tier (reported, not blocking). suppressed never counts either way.
+  _blk() { printf '%s\n' "$1" | jq -r 'select(._class!="suppressed" and ._blocking=="yes")|1' 2>/dev/null | grep -c . ; }
+  _rev() { printf '%s\n' "$1" | jq -r 'select(._class!="suppressed" and ._blocking=="no")|1'  2>/dev/null | grep -c . ; }
 
   # bumblebee
   if [ -f "$manifest" ]; then
     local bst; bst="$(jq -r '.status // "unknown"' "$manifest" 2>/dev/null)"
     if [ "$bst" = "exposed" ] && [ -f "$run_dir/findings.ndjson" ]; then
-      local cls s m e a
+      local cls
       cls="$(honey_classify_bumblebee "$run_dir/findings.ndjson")"
-      s="$(_cnt "$cls" suppressed)"; m="$(_cnt "$cls" mutated)"; e="$(_cnt "$cls" expired)"
-      a="$(printf '%s\n' "$cls" | jq -r 'select(._class!="suppressed")|._class' 2>/dev/null | grep -c .)"
-      sup=$((sup+s)); mut=$((mut+m)); exp=$((exp+e))
-      [ "$a" -gt 0 ] && overall="$(_worse "$overall" exposed)"
+      sup=$((sup+$(_cnt "$cls" suppressed))); mut=$((mut+$(_cnt "$cls" mutated))); exp=$((exp+$(_cnt "$cls" expired)))
+      rev=$((rev+$(_rev "$cls")))
+      [ "$(_blk "$cls")" -gt 0 ] && overall="$(_worse "$overall" exposed)"
     else
       overall="$(_worse "$overall" "$bst")"
     fi
@@ -239,16 +258,15 @@ baseline_effective_overall() {
     name="$(jq -r '.lens // ""' "$lj" 2>/dev/null)"
     lst="$(jq -r '.status // "unknown"' "$lj" 2>/dev/null)"
     if [ "$lst" = "exposed" ]; then
-      local cls s m e a
+      local cls
       cls="$(honey_classify_lens "$name" "$lj")"
-      s="$(_cnt "$cls" suppressed)"; m="$(_cnt "$cls" mutated)"; e="$(_cnt "$cls" expired)"
-      a="$(printf '%s\n' "$cls" | jq -r 'select(._class!="suppressed")|._class' 2>/dev/null | grep -c .)"
-      sup=$((sup+s)); mut=$((mut+m)); exp=$((exp+e))
-      [ "$a" -gt 0 ] && overall="$(_worse "$overall" exposed)"
+      sup=$((sup+$(_cnt "$cls" suppressed))); mut=$((mut+$(_cnt "$cls" mutated))); exp=$((exp+$(_cnt "$cls" expired)))
+      rev=$((rev+$(_rev "$cls")))
+      [ "$(_blk "$cls")" -gt 0 ] && overall="$(_worse "$overall" exposed)"
     else
       overall="$(_worse "$overall" "$lst")"
     fi
   done
 
-  printf '%s suppressed=%s mutated=%s expired=%s' "$overall" "$sup" "$mut" "$exp"
+  printf '%s suppressed=%s mutated=%s expired=%s review=%s' "$overall" "$sup" "$mut" "$exp" "$rev"
 }

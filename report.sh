@@ -37,8 +37,9 @@ COMPLETED="$(j '.scan_completed')"; CATDIR="$(j '.catalog_dir')"
 FILES="$(jq -r '.files_considered // "?"' "$RUN_DIR/summary.json" 2>/dev/null)"
 [ -z "$FILES" ] && FILES="?"   # summary.json may be empty/absent on scan_error
 
-# Suppression tallies, accumulated across bumblebee + every lens as we render.
-SUP=0; MUT=0; EXP=0
+# Suppression + verdict-policy tallies, accumulated across bumblebee + every
+# lens as we render. REV = active findings held below the severity floor.
+SUP=0; MUT=0; EXP=0; REV=0
 
 # Remediation guidance per ecosystem. Generic but correct starting points;
 # always "run manually" — honey never changes state.
@@ -92,40 +93,59 @@ render_lenses() {
                   [ "$(rank incomplete)" -gt "$(rank "$OVERALL")" ] && OVERALL="incomplete"; continue ;;
     esac
 
-    # exposed → classify against the baseline, then render only the findings
-    # that still contribute (active + mutated + expired). Suppressed ones are
-    # counted and summarized, not listed.
-    local cls s m e a
+    # exposed → classify against the baseline + verdict policy. Findings split
+    # three ways: suppressed (hidden), blocking (escalate OVERALL), and review
+    # (active but below the severity floor for their provenance — reported, not
+    # blocking). Suppressed ones are counted and summarized, not listed.
+    local cls s blk rev
     cls="$(honey_classify_lens "$name" "$lj")"
-    s="$(printf '%s\n' "$cls" | jq -r 'select(._class=="suppressed")|1' 2>/dev/null | grep -c .)"
-    m="$(printf '%s\n' "$cls" | jq -r 'select(._class=="mutated")|1'    2>/dev/null | grep -c .)"
-    e="$(printf '%s\n' "$cls" | jq -r 'select(._class=="expired")|1'    2>/dev/null | grep -c .)"
-    a="$(printf '%s\n' "$cls" | jq -r 'select(._class!="suppressed")|1' 2>/dev/null | grep -c .)"
-    SUP=$((SUP+s)); MUT=$((MUT+m)); EXP=$((EXP+e))
+    s="$(  printf '%s\n' "$cls" | jq -r 'select(._class=="suppressed")|1' 2>/dev/null | grep -c .)"
+    blk="$(printf '%s\n' "$cls" | jq -r 'select(._class!="suppressed" and ._blocking=="yes")|1' 2>/dev/null | grep -c .)"
+    rev="$(printf '%s\n' "$cls" | jq -r 'select(._class!="suppressed" and ._blocking=="no")|1'  2>/dev/null | grep -c .)"
+    SUP=$((SUP+s))
+    MUT=$((MUT+$(printf '%s\n' "$cls" | jq -r 'select(._class=="mutated")|1' 2>/dev/null | grep -c .)))
+    EXP=$((EXP+$(printf '%s\n' "$cls" | jq -r 'select(._class=="expired")|1' 2>/dev/null | grep -c .)))
+    REV=$((REV+rev))
 
-    if [ "$a" -eq 0 ]; then
-      # Every finding suppressed: this lens no longer contributes to the verdict.
+    if [ $((blk+rev)) -eq 0 ]; then
       echo "${G}✓ lens ${name}: clean${O} — all ${ltotal} finding(s) suppressed by baseline. ${D}(${lnote})${O}"
       continue
     fi
-    [ "$(rank exposed)" -gt "$(rank "$OVERALL")" ] && OVERALL="exposed"
 
-    local by supnote=""
-    by="$(printf '%s\n' "$cls" | jq -rs 'map(select(._class!="suppressed")) | group_by(.severity)
-      | map("\(length) \(.[0].severity)") | join(", ")' 2>/dev/null)"
-    [ "$s" -gt 0 ] && supnote="  ${D}(+${s} suppressed)${O}"
-    echo "${R}🚨 lens ${name}: ${a} finding(s)${O} [$by]${supnote}  ${D}(${lnote})${O}"
+    local extras=""
+    [ "$s" -gt 0 ] && extras="${extras}  ${D}(+${s} suppressed)${O}"
+    [ "$blk" -gt 0 ] && [ "$rev" -gt 0 ] && extras="${extras}  ${D}(+${rev} review)${O}"
+    if [ "$blk" -gt 0 ]; then
+      [ "$(rank exposed)" -gt "$(rank "$OVERALL")" ] && OVERALL="exposed"
+      local by
+      by="$(printf '%s\n' "$cls" | jq -rs 'map(select(._class!="suppressed" and ._blocking=="yes")) | group_by(.severity)
+        | map("\(length) \(.[0].severity)") | join(", ")' 2>/dev/null)"
+      echo "${R}🚨 lens ${name}: ${blk} finding(s)${O} [$by]${extras}  ${D}(${lnote})${O}"
+    else
+      # No blocking findings — only review-tier (first-party / below floor).
+      echo "${Y}● lens ${name}: ${rev} review finding(s)${O} — ${D}non-blocking (first-party or below the severity floor)${O}${extras}  ${D}(${lnote})${O}"
+    fi
+
+    # List blocking findings first (prominent), then review (dim), each tagged
+    # with provenance and a [review] marker when non-blocking.
     printf '%s\n' "$cls" | jq -rs --argjson ord "$ORDER" '
-        map(select(._class!="suppressed")) | sort_by($ord[.severity] // 9)[]
-        | [.severity,.title,.location,.detail,.ref,._class] | @tsv' 2>/dev/null \
-    | while IFS=$'\t' read -r SEV TITLE LOC DET REF CLASS; do
-        case "$SEV" in critical|high) C="$R";; medium) C="$Y";; *) C="$D";; esac
+        map(select(._class!="suppressed"))
+        | sort_by([ (if ._blocking=="yes" then 0 else 1 end), ($ord[.severity] // 9) ])[]
+        | [.severity,.title,.location,.detail,.ref,._class,._blocking,._provenance] | @tsv' 2>/dev/null \
+    | while IFS=$'\t' read -r SEV TITLE LOC DET REF CLASS BLK PROV; do
         SEV_UC="$(printf '%s' "$SEV" | tr '[:lower:]' '[:upper:]')"
         REFSUFFIX=""; [ -n "$REF" ] && REFSUFFIX="  ${D}(${REF})${O}"
-        echo "  $(class_prefix "$CLASS")${C}● ${SEV_UC}${O}  ${B}${TITLE}${O}${REFSUFFIX}"
-        echo "      where : $LOC"
-        [ -n "$DET" ] && echo "      detail: $DET"
-        [ "$CLASS" = "mutated" ] && echo "      ${R}note  : content changed since this was pinned reviewed-benign — re-review before re-pinning.${O}"
+        PTAG=""; [ "$PROV" = "first-party" ] && PTAG="  ${D}[1st-party]${O}"
+        if [ "$BLK" = "no" ]; then
+          echo "  ${D}○ review ${SEV_UC}  ${TITLE}${REFSUFFIX} [non-blocking]${O}"
+          echo "      ${D}where : $LOC${O}"
+        else
+          case "$SEV" in critical|high) C="$R";; medium) C="$Y";; *) C="$D";; esac
+          echo "  $(class_prefix "$CLASS")${C}● ${SEV_UC}${O}  ${B}${TITLE}${O}${REFSUFFIX}${PTAG}"
+          echo "      where : $LOC"
+          [ -n "$DET" ] && echo "      detail: $DET"
+          [ "$CLASS" = "mutated" ] && echo "      ${R}note  : content changed since this was pinned reviewed-benign — re-review before re-pinning.${O}"
+        fi
       done
   done
 }
@@ -187,21 +207,24 @@ esac
 # --- additional lenses ------------------------------------------------------
 render_lenses
 
-# --- suppression summary ----------------------------------------------------
-if [ $((SUP+MUT+EXP)) -gt 0 ]; then
+# --- suppression / policy summary -------------------------------------------
+if [ $((SUP+MUT+EXP+REV)) -gt 0 ]; then
   echo
   echo "${D}baseline: ${SUP} suppressed, ${MUT} mutated, ${EXP} expired — honey.baseline.json. Review: ./honey-baseline.sh status${O}"
+  [ "$REV" -gt 0 ] && echo "${D}policy: ${REV} finding(s) held below the severity floor (review tier, non-blocking). Floor: ${HONEY_VERDICT_FLOOR:-none} / trusted ${HONEY_VERDICT_FLOOR_TRUSTED:-${HONEY_VERDICT_FLOOR:-none}}.${O}"
   [ "$MUT" -gt 0 ] && echo "${R}⚠ ${MUT} MUTATED: a file pinned as reviewed-benign has CHANGED. Treat as a possible rug pull and re-review.${O}"
 fi
 
 # --- overall verdict --------------------------------------------------------
-# Suffix tallies so a suppressed run can never read as a bare all-clear.
+# Suffix tallies so a suppressed/held run can never read as a bare all-clear.
 SUFFIX=""
-if [ $((SUP+MUT+EXP)) -gt 0 ]; then
-  SUFFIX=" (${SUP} suppressed"
-  [ "$MUT" -gt 0 ] && SUFFIX="${SUFFIX}, ${MUT} mutated"
-  [ "$EXP" -gt 0 ] && SUFFIX="${SUFFIX}, ${EXP} expired"
-  SUFFIX="${SUFFIX})"
+if [ $((SUP+MUT+EXP+REV)) -gt 0 ]; then
+  parts=""
+  [ "$SUP" -gt 0 ] && parts="${parts}, ${SUP} suppressed"
+  [ "$REV" -gt 0 ] && parts="${parts}, ${REV} review"
+  [ "$MUT" -gt 0 ] && parts="${parts}, ${MUT} mutated"
+  [ "$EXP" -gt 0 ] && parts="${parts}, ${EXP} expired"
+  SUFFIX=" (${parts#, })"
 fi
 
 echo

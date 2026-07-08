@@ -22,6 +22,7 @@ $ErrorActionPreference = 'Stop'
 # Import Honey WITHOUT -Force: a forced re-import here would evict Honey's
 # commands from a caller that already imported it (report.ps1/daily-cycle.ps1).
 Import-Module (Join-Path $PSScriptRoot 'Honey.psm1')
+Import-Module (Join-Path $PSScriptRoot 'Verdict.psm1')
 
 # --- config ------------------------------------------------------------------
 
@@ -129,6 +130,14 @@ function Get-HoneyClassified {
         $f | Add-Member -NotePropertyName '_loc' -NotePropertyValue $loc -Force
         $f | Add-Member -NotePropertyName '_index' -NotePropertyValue $idx -Force
 
+        # Verdict policy: provenance (from location) + blocking (severity vs floor).
+        # bumblebee (known-compromised catalog) always blocks; the floor is a
+        # lens-noise dial, not a way to mute a known-bad package.
+        $sev = if ($f.PSObject.Properties.Name -contains 'severity' -and $f.severity) { [string]$f.severity } else { 'unknown' }
+        $prov = Get-HoneyProvenance $loc
+        $blk = if ($Scanner -eq 'bumblebee') { $true } else { (Test-HoneyBlocking $sev $prov) }
+        $f | Add-Member -NotePropertyName '_provenance' -NotePropertyValue $prov -Force
+
         $entry = $entries | Where-Object {
             $_.scanner -eq $Scanner -and $_.rule -eq $rule -and $_.location -eq $loc -and
             (([int](Get-HoneyEntryIndex $_)) -eq $idx)
@@ -137,6 +146,7 @@ function Get-HoneyClassified {
         if (-not $entry) {
             $f | Add-Member -NotePropertyName '_class' -NotePropertyValue 'active' -Force
             $f | Add-Member -NotePropertyName '_reason' -NotePropertyValue '' -Force
+            $f | Add-Member -NotePropertyName '_blocking' -NotePropertyValue $(if ($blk) { 'yes' } else { 'no' }) -Force
             [void]$out.Add($f); continue
         }
 
@@ -155,8 +165,11 @@ function Get-HoneyClassified {
         if ($curhash -and $curhash -eq $cmp) {
             if ($expires -ne 'never' -and $expires -lt $today) { $class = 'expired' } else { $class = 'suppressed' }
         }
+        # A MUTATED pin is the rug-pull tripwire — it always blocks, floor be damned.
+        if ($class -eq 'mutated') { $blk = $true }
         $f | Add-Member -NotePropertyName '_class' -NotePropertyValue $class -Force
         $f | Add-Member -NotePropertyName '_reason' -NotePropertyValue $reason -Force
+        $f | Add-Member -NotePropertyName '_blocking' -NotePropertyValue $(if ($blk) { 'yes' } else { 'no' }) -Force
         [void]$out.Add($f)
     }
     return $out.ToArray()
@@ -233,7 +246,7 @@ function Get-HoneyClassifiedRun {
 # through untouched.
 function Get-HoneyEffectiveOverall {
     param([string]$RunDir)
-    $sup = 0; $mut = 0; $exp = 0; $overall = 'clean'
+    $sup = 0; $mut = 0; $exp = 0; $rev = 0; $overall = 'clean'
 
     $manifestPath = Join-Path $RunDir 'manifest.json'
     if (Test-Path -LiteralPath $manifestPath) {
@@ -246,7 +259,8 @@ function Get-HoneyEffectiveOverall {
             $sup += @($cls | Where-Object { $_._class -eq 'suppressed' }).Count
             $mut += @($cls | Where-Object { $_._class -eq 'mutated' }).Count
             $exp += @($cls | Where-Object { $_._class -eq 'expired' }).Count
-            if (@($cls | Where-Object { $_._class -ne 'suppressed' }).Count -gt 0) { $overall = Resolve-WorseStatus $overall 'exposed' }
+            $rev += @($cls | Where-Object { $_._class -ne 'suppressed' -and $_._blocking -eq 'no' }).Count
+            if (@($cls | Where-Object { $_._class -ne 'suppressed' -and $_._blocking -eq 'yes' }).Count -gt 0) { $overall = Resolve-WorseStatus $overall 'exposed' }
         } else {
             $overall = Resolve-WorseStatus $overall $bst
         }
@@ -261,13 +275,14 @@ function Get-HoneyEffectiveOverall {
             $sup += @($cls | Where-Object { $_._class -eq 'suppressed' }).Count
             $mut += @($cls | Where-Object { $_._class -eq 'mutated' }).Count
             $exp += @($cls | Where-Object { $_._class -eq 'expired' }).Count
-            if (@($cls | Where-Object { $_._class -ne 'suppressed' }).Count -gt 0) { $overall = Resolve-WorseStatus $overall 'exposed' }
+            $rev += @($cls | Where-Object { $_._class -ne 'suppressed' -and $_._blocking -eq 'no' }).Count
+            if (@($cls | Where-Object { $_._class -ne 'suppressed' -and $_._blocking -eq 'yes' }).Count -gt 0) { $overall = Resolve-WorseStatus $overall 'exposed' }
         } else {
             $overall = Resolve-WorseStatus $overall $lst
         }
     }
 
-    return @{ status = $overall; suppressed = $sup; mutated = $mut; expired = $exp }
+    return @{ status = $overall; suppressed = $sup; mutated = $mut; expired = $exp; review = $rev }
 }
 
 Export-ModuleMember -Function Get-HoneyBaselineFile, Get-HoneyBaselineEntry,

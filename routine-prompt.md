@@ -62,8 +62,14 @@ SUPPRESSION BASELINE — the OVERALL line may carry a tally, e.g.
     fold it into "all clear". A run with any `mutated` is never CLEAN.
   • `expired` = a pin passed its expiry and resurfaced; treat as a normal active
     finding due for re-review.
-  • `CLEAN (N suppressed)` is still all-clear — but say "all clear (N previously
-    reviewed findings suppressed)", not a bare "all clear".
+  • `review` = active findings held BELOW the severity floor (verdict policy) —
+    typically first-party / trusted-marketplace low/medium noise. They are
+    reported but non-blocking. Summarize them briefly ("N low-severity first-party
+    findings, non-blocking"); do not treat them as urgent. A run whose only
+    findings are `review` is CLEAN.
+  • `CLEAN (N suppressed)` / `CLEAN (N review)` is still all-clear — but name the
+    counts ("all clear; N previously reviewed / N below-floor findings"), not a
+    bare "all clear".
 
 Treat report.sh's output as the factual baseline; do not contradict it or
 invent findings beyond it. For extra detail read HONEY_DIR/latest/lens-*.json
