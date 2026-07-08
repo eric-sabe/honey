@@ -111,16 +111,18 @@ the next run. `./doctor.sh` shows which lenses are active.
 |---|---|---|---|
 | `skillspector` | [NVIDIA SkillSpector](https://github.com/NVIDIA/skillspector) | AI agent skills (`SKILL.md` + scripts): prompt injection, data exfil, excessive agency, tool poisoning | per its README (Python 3.12+) |
 | `smuggle` | honey-native | **Scanner-evasion** in agent-skill/instruction files: invisible-Unicode (tag chars), bidi overrides (Trojan Source), zero-width chars, and remote-include instructions — the tricks static pattern scanners miss | none (uses `perl`; PowerShell uses native .NET) |
+| `mcp` | honey-native | **MCP servers** (`.mcp.json` + host configs — invisible to skillspector): inventories every server and **hash-diffs its definition across runs to catch rug pulls** (a server that changes after you approve it); flags fetch-and-exec launch commands | none (jq / native .NET) |
 | `osv-scanner` | [Google/OSV osv-scanner](https://github.com/google/osv-scanner) | Known vulns in lockfiles/manifests across **all** ecosystems (npm, pypi, cargo, go, …) | `go install github.com/google/osv-scanner/cmd/osv-scanner@latest` |
 | `govulncheck` | [Go vuln team govulncheck](https://golang.org/x/vuln) | Go vulns that your code **actually calls** (reachability-aware → far less noise) | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
 
 **What each answers.** bumblebee: *"do I have a known-compromised package?"*
 (exact catalog match). skillspector: *"is this agent skill behaving
 maliciously?"* (content analysis). smuggle: *"is something hidden from the
-scanners — invisible Unicode, a bidi trick, a remote include?"* (evasion).
-osv-scanner: *"do my dependencies have known CVEs?"* (broad). govulncheck: *"do I
-actually reach a vulnerable Go function?"* (deep, low-noise). Together they cover
-reactive, proactive, breadth, depth, and anti-evasion.
+scanners — invisible Unicode, a bidi trick, a remote include?"* (evasion). mcp:
+*"did an MCP server's definition change since I approved it?"* (rug-pull
+diffing). osv-scanner: *"do my dependencies have known CVEs?"* (broad).
+govulncheck: *"do I actually reach a vulnerable Go function?"* (deep, low-noise).
+Together they cover reactive, proactive, breadth, depth, anti-evasion, and drift.
 
 **Where the vuln lenses scan.** osv-scanner and govulncheck scan your *project*
 directories, not all of `$HOME`. Set `HONEY_PROJECT_ROOTS` (colon-separated;
@@ -371,6 +373,8 @@ one-off run. You can also hand-edit `honey.conf` — one `export VAR=…` per li
 | `HONEY_PROJECT_ROOTS` | `~/git:~/code:~/Developer:~/src` | where the vuln lenses (osv-scanner, govulncheck) look for projects |
 | `HONEY_SKILL_ROOTS` | skill dirs under `~/.claude` | where the skillspector and smuggle lenses look for agent skills |
 | `HONEY_SMUGGLE_EXCLUDE` | `node_modules`/`.git`/`vendor`/`.pnpm` | smuggle lens: skip files whose path matches (ERE) |
+| `HONEY_MCP_CONFIGS` | Claude/Cursor/VS Code/Windsurf host configs | mcp lens: colon-separated MCP config files to inventory (plus every `.mcp.json` under the project roots) |
+| `HONEY_MCP_STATE` | `<repo>/.mcp-state.json` | mcp lens: where the per-run manifest hashes are stored for rug-pull diffing (gitignored) |
 | `HONEY_UPDATE_LENSES` | `1` | `go install @latest` the Go lens binaries (osv-scanner, govulncheck) before scanning; `0` to skip |
 | `HONEY_OSV_OFFLINE` | `0` | osv-scanner: use local vuln DBs instead of OSV.dev |
 | `HONEY_OSV_INCLUDE_GO_STDLIB` | `0` | osv-scanner: keep Go stdlib advisories (default defers them to govulncheck) |

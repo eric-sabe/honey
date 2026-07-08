@@ -61,6 +61,9 @@ if [ -d "$HONEY/lenses" ] && ls "$HONEY"/lenses/*.sh >/dev/null 2>&1; then
           bad "lens $lname inactive — perl not found (optional)"
           hint "invisible-Unicode/bidi + remote-include detection; install perl to enable (ships on macOS + most Linux)"
         fi ;;
+      mcp)
+        # honey-native lens (jq only) — MCP manifest inventory + rug-pull diffing.
+        ok "lens $lname active (native; MCP manifest hash-and-diff, jq only)" ;;
       *)
         if command -v "$lname" >/dev/null 2>&1; then ok "lens $lname active"; else bad "lens $lname inactive (optional tool '$lname' not installed)"; fi ;;
     esac

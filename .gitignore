@@ -14,6 +14,10 @@ honey.conf.ps1
 # committed and reviewed in git — that auditability is an anti-gaming control
 # (see docs/BASELINE.plan.md). Do not add it here.
 
+# MCP-manifest lens state — auto-maintained hashes of MCP server definitions for
+# rug-pull (drift) detection. Machine-specific; contains local config hashes.
+.mcp-state.json
+
 # Local secrets, if you ever add any (e.g. Slack webhook/token).
 secrets.env
 *.env

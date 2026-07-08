@@ -75,8 +75,9 @@ foreach ($t in $lensTools.Keys) {
     if (Get-Command $t -ErrorAction SilentlyContinue) { Ok "lens $t active" }
     else { Write-HoneyConsole "  [ ] lens $t inactive (optional)"; Hint $lensTools[$t] }
 }
-# honey-native lens: no external tool, uses .NET Unicode enumeration — always on.
+# honey-native lenses: no external tool — always on.
 Ok "lens smuggle active (native; invisible-Unicode/bidi + remote-include detection)"
+Ok "lens mcp active (native; MCP manifest hash-and-diff for rug pulls)"
 
 # Suppression baseline (informational; never affects pass/fail).
 Write-HoneyConsole ""
