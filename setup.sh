@@ -4,7 +4,8 @@
 #
 #   1. Verify the toolchain (bash, git, jq, Go 1.25+).
 #   2. Clone the bumblebee repo (for threat_intel catalogs) if absent.
-#   3. go install the bumblebee binary.
+#   3. Build the bumblebee binary from that checkout (binary + catalogs from
+#      one commit — a released @latest can lag the catalogs' schema).
 #   4. Offer the optional Go-based vuln lenses (osv-scanner, govulncheck).
 #   5. Run doctor.sh to confirm everything is ready.
 #
@@ -99,9 +100,17 @@ else
 fi
 
 # --- 3. bumblebee binary ----------------------------------------------------
-echo "  installing bumblebee binary (go install $GO_PKG) ..."
-if go install "$GO_PKG"; then
-  ok "binary installed"
+# Build from the checkout we just cloned/updated so the binary and the
+# threat_intel catalogs share one commit. A module-proxy @latest install is
+# only as new as the last tagged release and can reject newer catalogs
+# ("unsupported exposure catalog schema_version"); fall back to it only if
+# the local build fails.
+echo "  installing bumblebee binary from checkout ($BUMBLEBEE_REPO) ..."
+if (cd "$BUMBLEBEE_REPO" && go install ./cmd/bumblebee); then
+  ok "binary installed (built from checkout — matches catalogs)"
+elif go install "$GO_PKG"; then
+  ok "binary installed (module proxy $GO_PKG)"
+  bad "local build failed — proxy binary may lag the catalogs' schema (run-scan.sh will retry the local build each cycle)"
 else
   bad "go install failed"; exit 1
 fi

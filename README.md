@@ -94,8 +94,12 @@ folded into one worst-wins verdict.
 
 1. `git pull --ff-only` the bumblebee checkout — fresh `threat_intel/`
    catalogs (they're updated upstream via PR).
-2. `go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest` — fresh
-   binary.
+2. `go install ./cmd/bumblebee` **from that same checkout** — the binary is
+   built at the exact commit the catalogs came from, so the two can never
+   disagree about the catalog `schema_version`. (A module-proxy `@latest`
+   install is only as new as the last tagged release and can lag catalogs
+   that arrive via PR — a skew that aborts the scan. The proxy install is
+   kept only as a fallback when the local build fails.)
 3. `bumblebee scan --profile deep --root $HOME --exposure-catalog <repo>/threat_intel
    --findings-only` → writes a timestamped run dir + `manifest.json`.
 4. Each active [lens](#lenses--additional-scanners-optional) runs and writes its
@@ -203,7 +207,8 @@ and honey treats them differently:
   databases (OSV.dev, vuln.go.dev) on every scan, so a CVE published yesterday
   is caught today with no update step.
 - **Go lens binaries auto-update.** Before scanning, honey `go install
-  @latest`s osv-scanner and govulncheck (just as it does the bumblebee binary).
+  @latest`s osv-scanner and govulncheck. (bumblebee itself is instead built
+  from its checkout, pinned to the same commit as its catalogs — see above.)
   Set `HONEY_UPDATE_LENSES=0` to disable. The update is non-fatal: if it fails
   (offline, etc.) the lens keeps its existing binary and scans anyway. A
   breaking upstream change surfaces as `scan_error` (visible), never a false

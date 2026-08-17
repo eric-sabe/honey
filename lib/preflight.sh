@@ -69,7 +69,9 @@ check_bumblebee_binary() {
   if command -v bumblebee >/dev/null 2>&1; then
     ok "bumblebee binary ($(bumblebee version 2>/dev/null | head -1))"; return 0
   else
-    bad "bumblebee binary not found on PATH"; hint "go install $GO_PKG"; return 1
+    bad "bumblebee binary not found on PATH"
+    hint "build from your checkout (matches its catalogs): (cd \"$BUMBLEBEE_REPO\" && go install ./cmd/bumblebee)"
+    hint "or (may lag the catalogs' schema): go install $GO_PKG"; return 1
   fi
 }
 
@@ -79,7 +81,8 @@ check_bumblebee_selftest() {
   if out="$(bumblebee selftest 2>&1)"; then
     ok "bumblebee selftest: ${out}"; return 0
   else
-    bad "bumblebee selftest FAILED"; hint "$out"; hint "reinstall: go install $GO_PKG"; return 1
+    bad "bumblebee selftest FAILED"; hint "$out"
+    hint "reinstall from your checkout: (cd \"$BUMBLEBEE_REPO\" && go install ./cmd/bumblebee)"; return 1
   fi
 }
 

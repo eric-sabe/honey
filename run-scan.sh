@@ -3,7 +3,11 @@
 # honey/run-scan.sh — regular bumblebee exposure scan cycle.
 #
 # 1. Updates the bumblebee repo clone (fresh threat_intel/ catalogs via PR).
-# 2. Updates the bumblebee binary (go install ...@latest).
+# 2. Updates the bumblebee binary — built FROM THAT SAME CHECKOUT, so the
+#    binary and the catalogs always come from one commit and can never skew
+#    (a released binary that predates the catalogs' schema_version would
+#    otherwise abort the scan). Falls back to the module-proxy @latest only
+#    if the local build fails.
 # 3. Runs a deep exposure scan of $HOME against the threat_intel catalogs.
 # 4. Saves timestamped, self-contained results under honey/runs/<ts>/ and
 #    points honey/latest at the newest run.
@@ -96,15 +100,26 @@ fi
 REPO_COMMIT="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 # ----------------------------------------------------------------------------
-# 2. Update the binary.
+# 2. Update the binary — from the checkout, not the module proxy.
+#
+# The catalogs (step 1) track the repo's HEAD; a proxy @latest binary is only
+# as new as the last tagged release and can lag the catalogs' schema_version,
+# which aborts the whole scan (seen live: v0.1.2 binary vs 0.2.0 catalogs).
+# Building from the same commit the catalogs came from makes skew impossible.
+# The proxy install remains as a fallback for a broken checkout — it may still
+# skew, but a stale binary that *might* scan beats no fresh binary at all, and
+# a mismatch surfaces loudly as scan_error rather than a false clean.
 # ----------------------------------------------------------------------------
 BINARY_UPDATED=false
 if command -v go >/dev/null 2>&1; then
-  if go install "$GO_PKG" >>"$LOG" 2>&1; then
+  if (cd "$REPO" && go install ./cmd/bumblebee) >>"$LOG" 2>&1; then
     BINARY_UPDATED=true
-    log "binary updated (go install $GO_PKG)"
+    log "binary updated (go install ./cmd/bumblebee @ $REPO_COMMIT — matches catalogs)"
+  elif go install "$GO_PKG" >>"$LOG" 2>&1; then
+    BINARY_UPDATED=true
+    log "WARN local build failed; installed module-proxy $GO_PKG instead — released binary may lag the checkout's catalogs (schema skew => scan_error)"
   else
-    log "WARN go install failed (continuing with existing binary)"
+    log "WARN binary update failed (continuing with existing binary)"
   fi
 else
   log "WARN go not found on PATH (continuing with existing binary)"
